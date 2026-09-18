@@ -62,6 +62,7 @@ final class PinyinEngine {
                 uniqueKeysWithValues: selectionCounts
                     .sorted { $0.value > $1.value }
                     .prefix(500)
+                    .map { ($0.key, $0.value) }
             )
         }
         UserDefaults.standard.set(selectionCounts, forKey: Defaults.selections)
