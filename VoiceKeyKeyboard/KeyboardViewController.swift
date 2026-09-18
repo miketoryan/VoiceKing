@@ -410,7 +410,7 @@ final class KeyboardViewController: UIInputViewController {
         let word = englishPartialWord
         let range = NSRange(location: 0, length: (word as NSString).length)
         let userCompletions = supplementaryWords.filter {
-            $0.localizedCaseInsensitiveHasPrefix(word) &&
+            $0.range(of: word, options: [.caseInsensitive, .anchored]) != nil &&
                 $0.caseInsensitiveCompare(word) != .orderedSame
         }
         let completions = textChecker.completions(
