@@ -1,0 +1,54 @@
+name: VoiceKey
+
+options:
+  bundleIdPrefix: com.miketoryan
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "26.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: ""
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
+targets:
+  VoiceKey:
+    type: application
+    platform: iOS
+    sources:
+      - path: VoiceKey
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKey
+        PRODUCT_NAME: VoiceKey
+        INFOPLIST_FILE: VoiceKey/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - target: VoiceKeyKeyboard
+        embed: true
+
+  VoiceKeyKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: VoiceKeyKeyboard
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKey.Keyboard
+        PRODUCT_NAME: VoiceKeyKeyboard
+        INFOPLIST_FILE: VoiceKeyKeyboard/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+
+schemes:
+  VoiceKey:
+    build:
+      targets:
+        VoiceKey: all
+        VoiceKeyKeyboard: all
+    run:
+      config: Debug
