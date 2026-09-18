@@ -25,7 +25,7 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
         static let tokenURL = "https://auth.openai.com/oauth/token"
         static let redirectURI = "http://localhost:1455/auth/callback"
         static let scopes = "openid profile email offline_access"
-        static let keychainAccount = "chatgpt.oauth"
+        static let keychainAccount = "voiceking.chatgpt.oauth"
     }
 
     @Published private(set) var credential: Credential?
@@ -78,7 +78,7 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
         let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
             let session = ASWebAuthenticationSession(
                 url: authorizationURL,
-                callbackURLScheme: "voicekey"
+                callbackURLScheme: "voiceking"
             ) { url, error in
                 if let error {
                     continuation.resume(throwing: error)

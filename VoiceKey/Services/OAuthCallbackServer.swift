@@ -3,7 +3,7 @@ import Network
 
 final class OAuthCallbackServer {
     private let port: NWEndpoint.Port = 1455
-    private let redirectBase = "voicekey://auth/callback"
+    private let redirectBase = "voiceking://auth/callback"
 
     func start() async throws -> NWListener {
         let listener = try NWListener(using: .tcp, on: port)

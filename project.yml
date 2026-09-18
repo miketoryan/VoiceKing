@@ -1,4 +1,4 @@
-name: VoiceKey
+name: VoiceKing
 
 options:
   bundleIdPrefix: com.miketoryan
@@ -13,7 +13,7 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
 targets:
-  VoiceKey:
+  VoiceKing:
     type: application
     platform: iOS
     sources:
@@ -21,15 +21,15 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKey
-        PRODUCT_NAME: VoiceKey
+        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKing
+        PRODUCT_NAME: VoiceKing
         INFOPLIST_FILE: VoiceKey/Info.plist
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
-      - target: VoiceKeyKeyboard
+      - target: VoiceKingKeyboard
         embed: true
 
-  VoiceKeyKeyboard:
+  VoiceKingKeyboard:
     type: app-extension
     platform: iOS
     sources:
@@ -37,18 +37,18 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKey.Keyboard
-        PRODUCT_NAME: VoiceKeyKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.miketoryan.VoiceKing.Keyboard
+        PRODUCT_NAME: VoiceKingKeyboard
         INFOPLIST_FILE: VoiceKeyKeyboard/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
 
 schemes:
-  VoiceKey:
+  VoiceKing:
     build:
       targets:
-        VoiceKey: all
-        VoiceKeyKeyboard: all
+        VoiceKing: all
+        VoiceKingKeyboard: all
     run:
       config: Debug

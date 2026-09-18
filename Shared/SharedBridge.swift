@@ -1,14 +1,26 @@
 import Foundation
 
 enum LocalBridge {
-    static let port = 14_556
-    static let protocolVersion = "1"
+    static let port = 14_557
+    static let protocolVersion = "2"
     static let keyboardHeartbeatInterval: Duration = .seconds(2)
     static let keyboardExitGracePeriod: TimeInterval = 10
     static let resultValidity: TimeInterval = 300
 
     static let commandURL = URL(string: "http://127.0.0.1:\(port)/command")!
     static let stateURL = URL(string: "http://127.0.0.1:\(port)/state")!
+}
+
+enum TranscriptionMode: String, Codable, CaseIterable, Sendable {
+    case smart
+    case verbatim
+
+    var displayName: String {
+        switch self {
+        case .smart: "智能整理"
+        case .verbatim: "原文模式"
+        }
+    }
 }
 
 enum BridgeAction: String, Codable, Sendable {
@@ -22,10 +34,16 @@ enum BridgeAction: String, Codable, Sendable {
 struct BridgeRequest: Codable, Sendable {
     let action: BridgeAction
     let requestID: String?
+    let mode: TranscriptionMode?
 
-    init(action: BridgeAction, requestID: String? = nil) {
+    init(
+        action: BridgeAction,
+        requestID: String? = nil,
+        mode: TranscriptionMode? = nil
+    ) {
         self.action = action
         self.requestID = requestID
+        self.mode = mode
     }
 }
 
@@ -78,17 +96,23 @@ struct LocalBridgeClient: Sendable {
         var request = URLRequest(url: LocalBridge.stateURL)
         request.httpMethod = "GET"
         request.timeoutInterval = 2
-        request.setValue(LocalBridge.protocolVersion, forHTTPHeaderField: "X-VoiceKey-Protocol")
+        request.setValue(LocalBridge.protocolVersion, forHTTPHeaderField: "X-VoiceKing-Protocol")
         return try await perform(request)
     }
 
-    func send(_ action: BridgeAction, requestID: String? = nil) async throws -> BridgeState {
+    func send(
+        _ action: BridgeAction,
+        requestID: String? = nil,
+        mode: TranscriptionMode? = nil
+    ) async throws -> BridgeState {
         var request = URLRequest(url: LocalBridge.commandURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 5
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(LocalBridge.protocolVersion, forHTTPHeaderField: "X-VoiceKey-Protocol")
-        request.httpBody = try JSONEncoder().encode(BridgeRequest(action: action, requestID: requestID))
+        request.setValue(LocalBridge.protocolVersion, forHTTPHeaderField: "X-VoiceKing-Protocol")
+        request.httpBody = try JSONEncoder().encode(
+            BridgeRequest(action: action, requestID: requestID, mode: mode)
+        )
         return try await perform(request)
     }
 
@@ -110,9 +134,9 @@ struct LocalBridgeClient: Sendable {
         var errorDescription: String? {
             switch self {
             case .invalidResponse:
-                "VoiceKey returned an invalid response."
+                "VoiceKing returned an invalid response."
             case .http(let status):
-                "VoiceKey communication failed (HTTP \(status))."
+                "VoiceKing communication failed (HTTP \(status))."
             }
         }
     }

@@ -86,7 +86,7 @@ final class AudioService: @unchecked Sendable {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
 
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voicekey-\(UUID().uuidString)")
+            .appendingPathComponent("voiceking-\(UUID().uuidString)")
             .appendingPathExtension("wav")
 
         let format = engine.inputNode.inputFormat(forBus: 0)
@@ -181,8 +181,8 @@ final class AudioService: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .noInput: "No microphone input is available."
-            case .notArmed: "Start the VoiceKey keyboard service first."
-            case .keepAliveFailed: "VoiceKey could not keep its background service active."
+            case .notArmed: "Start the VoiceKing keyboard service first."
+            case .keepAliveFailed: "VoiceKing could not keep its background service active."
             }
         }
     }

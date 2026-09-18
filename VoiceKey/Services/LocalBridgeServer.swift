@@ -4,7 +4,7 @@ import Network
 final class LocalBridgeServer: @unchecked Sendable {
     typealias Handler = @Sendable (BridgeRequest) async -> BridgeState
 
-    private let queue = DispatchQueue(label: "com.miketoryan.VoiceKey.local-bridge")
+    private let queue = DispatchQueue(label: "com.miketoryan.VoiceKing.local-bridge")
     private var listener: NWListener?
     private var handler: Handler?
 
@@ -110,7 +110,7 @@ final class LocalBridgeServer: @unchecked Sendable {
         let headers = headerPairs.reduce(into: [String: String]()) { result, pair in
             result[pair.0] = pair.1
         }
-        guard headers["x-voicekey-protocol"] == LocalBridge.protocolVersion else {
+        guard headers["x-voiceking-protocol"] == LocalBridge.protocolVersion else {
             return .invalid
         }
 
@@ -162,7 +162,7 @@ final class LocalBridgeServer: @unchecked Sendable {
         case invalidPort
 
         var errorDescription: String? {
-            "VoiceKey local communication port is invalid."
+            "VoiceKing local communication port is invalid."
         }
     }
 

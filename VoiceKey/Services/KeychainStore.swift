@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "com.miketoryan.VoiceKey"
+    private static let service = "com.miketoryan.VoiceKing"
 
     static func save(_ data: Data, account: String) throws {
         let query: [String: Any] = [

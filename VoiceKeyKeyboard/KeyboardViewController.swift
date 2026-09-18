@@ -2,6 +2,7 @@ import UIKit
 
 final class KeyboardViewController: UIInputViewController {
     private let statusLabel = UILabel()
+    private let modeControl = UISegmentedControl(items: ["智能整理", "原文模式"])
     private let micButton = UIButton(type: .system)
     private let globeButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
@@ -11,9 +12,14 @@ final class KeyboardViewController: UIInputViewController {
     private var currentRequestID: String?
     private var keyboardVisible = false
     private var mayAutoInsert = false
+    private var pendingAutoRecordingAfterLaunch = false
     private var heartbeatTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
+
+    private enum Defaults {
+        static let transcriptionMode = "voiceking.transcription-mode"
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -55,6 +61,9 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.numberOfLines = 2
         statusLabel.textColor = .secondaryLabel
 
+        modeControl.selectedSegmentIndex = selectedMode == .smart ? 0 : 1
+        modeControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+
         micButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .semibold)
         micButton.layer.cornerRadius = 16
         micButton.backgroundColor = .systemBlue
@@ -75,7 +84,7 @@ final class KeyboardViewController: UIInputViewController {
         tools.distribution = .fillEqually
         tools.spacing = 10
 
-        let stack = UIStackView(arrangedSubviews: [statusLabel, tools])
+        let stack = UIStackView(arrangedSubviews: [modeControl, statusLabel, tools])
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -88,13 +97,20 @@ final class KeyboardViewController: UIInputViewController {
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
             micButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
-            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 130)
+            view.heightAnchor.constraint(greaterThanOrEqualToConstant: 170)
         ])
+    }
+
+    @objc private func modeChanged() {
+        let mode: TranscriptionMode = modeControl.selectedSegmentIndex == 1
+            ? .verbatim
+            : .smart
+        UserDefaults.standard.set(mode.rawValue, forKey: Defaults.transcriptionMode)
     }
 
     @objc private func toggleRecording() {
         guard hasFullAccess else {
-            statusLabel.text = "Enable Allow Full Access for VoiceKey in Settings."
+            statusLabel.text = "Enable Allow Full Access for VoiceKing in Settings."
             return
         }
 
@@ -106,9 +122,7 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         guard latestState.serviceReady else {
-            statusLabel.text = "Open VoiceKey and start Keyboard Service first."
-            micButton.setTitle(" Start Service in App ", for: .normal)
-            micButton.backgroundColor = .systemGray
+            launchVoiceKingAndResumeRecording()
             return
         }
 
@@ -193,16 +207,24 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func sendCommand(_ action: BridgeAction, requestID: String?) {
+    private func sendCommand(
+        _ action: BridgeAction,
+        requestID: String?,
+        mode: TranscriptionMode? = nil
+    ) {
         commandTask?.cancel()
         commandTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let state = try await self.bridge.send(action, requestID: requestID)
+                let state = try await self.bridge.send(
+                    action,
+                    requestID: requestID,
+                    mode: mode
+                )
                 self.apply(state)
             } catch {
                 self.latestState = .unavailable(
-                    "VoiceKey did not respond. Open the app and start Keyboard Service again."
+                    "VoiceKing did not respond. Tap the microphone to restart it."
                 )
                 self.refreshUI()
             }
@@ -224,7 +246,11 @@ final class KeyboardViewController: UIInputViewController {
             lastError: nil
         )
         refreshUI()
-        sendCommand(.startRecording, requestID: requestID)
+        sendCommand(
+            .startRecording,
+            requestID: requestID,
+            mode: selectedMode
+        )
     }
 
     private func apply(_ state: BridgeState) {
@@ -234,6 +260,14 @@ final class KeyboardViewController: UIInputViewController {
         }
         latestState = state
         refreshUI()
+
+        if pendingAutoRecordingAfterLaunch,
+           state.serviceReady,
+           state.status == .idle {
+            pendingAutoRecordingAfterLaunch = false
+            startRecordingRequest()
+            return
+        }
 
         if state.status == .completed {
             insertLatestTranscription()
@@ -246,7 +280,7 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         latestState = .unavailable(
-            "Open VoiceKey and start Keyboard Service."
+            "Tap the microphone to restart VoiceKing."
         )
         refreshUI()
     }
@@ -270,8 +304,8 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         guard latestState.serviceReady else {
-            statusLabel.text = latestState.lastError ?? "Open VoiceKey and start Keyboard Service."
-            micButton.setTitle(" Start Service in App ", for: .normal)
+            statusLabel.text = latestState.lastError ?? "VoiceKing service is sleeping."
+            micButton.setTitle(" 🎙  Wake & Speak ", for: .normal)
             micButton.backgroundColor = .systemGray
             return
         }
@@ -282,7 +316,7 @@ final class KeyboardViewController: UIInputViewController {
             micButton.setTitle(" 🎙  Speak ", for: .normal)
             micButton.backgroundColor = .systemBlue
         case .starting:
-            statusLabel.text = "Connecting to VoiceKey…"
+            statusLabel.text = "Connecting to VoiceKing…"
             micButton.setTitle(" Starting… ", for: .normal)
             micButton.backgroundColor = .systemGray
         case .recording:
@@ -341,5 +375,37 @@ final class KeyboardViewController: UIInputViewController {
         )
         refreshUI()
         sendCommand(.acknowledgeResult, requestID: requestID)
+    }
+
+    private var selectedMode: TranscriptionMode {
+        guard let rawValue = UserDefaults.standard.string(forKey: Defaults.transcriptionMode),
+              let mode = TranscriptionMode(rawValue: rawValue) else {
+            return .smart
+        }
+        return mode
+    }
+
+    private func launchVoiceKingAndResumeRecording() {
+        guard !pendingAutoRecordingAfterLaunch else { return }
+        pendingAutoRecordingAfterLaunch = true
+        statusLabel.text = "Starting VoiceKing…"
+        micButton.setTitle(" Opening App… ", for: .normal)
+        micButton.backgroundColor = .systemGray
+
+        guard let url = URL(string: "voiceking://start-recording?mode=\(selectedMode.rawValue)") else {
+            pendingAutoRecordingAfterLaunch = false
+            return
+        }
+
+        extensionContext?.open(url) { [weak self] opened in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if !opened {
+                    self.pendingAutoRecordingAfterLaunch = false
+                    self.statusLabel.text = "Open VoiceKing once, then try again."
+                    self.refreshUI()
+                }
+            }
+        }
     }
 }

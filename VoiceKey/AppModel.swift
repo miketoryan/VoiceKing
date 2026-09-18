@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UIKit
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -12,12 +13,14 @@ final class AppModel: ObservableObject {
     private let auth: ChatGPTAuthManager
     private let audio = AudioService()
     private let transcriber = ChatGPTTranscriptionService()
+    private let cleanupService = ChatGPTCleanupService()
     private let localBridge = LocalBridgeServer()
     private let serverID = UUID().uuidString
 
     private var stateRevision: UInt64 = 0
     private var activeRecordingURL: URL?
     private var activeRequestID: String?
+    private var activeTranscriptionMode: TranscriptionMode = .smart
     private var bridgeStatus: BridgeStatus = .idle
     private var responseText: String?
     private var resultCreatedAt: Date?
@@ -36,7 +39,7 @@ final class AppModel: ObservableObject {
         do {
             try localBridge.start { [weak self] request in
                 guard let self else {
-                    return BridgeState.unavailable("VoiceKey is not running.")
+                    return BridgeState.unavailable("VoiceKing is not running.")
                 }
                 return await self.handleBridgeRequest(request)
             }
@@ -91,7 +94,7 @@ final class AppModel: ObservableObject {
 
             try audio.enterStandby()
             serviceReady = true
-            statusText = "Waiting for VoiceKey keyboard"
+            statusText = "Waiting for VoiceKing keyboard"
             activeRecordingURL = nil
             activeRequestID = nil
             bridgeStatus = .idle
@@ -102,6 +105,19 @@ final class AppModel: ObservableObject {
         } catch {
             publishError(error.localizedDescription)
         }
+    }
+
+    func handleIncomingURL(_ url: URL) async {
+        guard url.scheme?.lowercased() == "voiceking",
+              url.host?.lowercased() == "start-recording" else {
+            return
+        }
+
+        await startService()
+        guard serviceReady else { return }
+
+        try? await Task.sleep(for: .milliseconds(350))
+        returnToPreviousApp()
     }
 
     func stopService() {
@@ -135,7 +151,10 @@ final class AppModel: ObservableObject {
 
         case .startRecording:
             activateMicrophoneForKeyboardIfNeeded()
-            startRecordingFromKeyboard(requestID: request.requestID)
+            startRecordingFromKeyboard(
+                requestID: request.requestID,
+                mode: request.mode ?? .smart
+            )
 
         case .stopRecording:
             activateMicrophoneForKeyboardIfNeeded()
@@ -171,16 +190,19 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func startRecordingFromKeyboard(requestID: String?) {
+    private func startRecordingFromKeyboard(
+        requestID: String?,
+        mode: TranscriptionMode
+    ) {
         guard serviceReady, audio.isRunning else {
             publishError(
-                "Open VoiceKey and start Keyboard Service first.",
+                "Open VoiceKing and start Keyboard Service first.",
                 requestID: requestID
             )
             return
         }
         guard let requestID, !requestID.isEmpty else {
-            publishError("VoiceKey received an invalid recording request.")
+            publishError("VoiceKing received an invalid recording request.")
             return
         }
         guard bridgeStatus != .recording,
@@ -191,6 +213,7 @@ final class AppModel: ObservableObject {
 
         bridgeStatus = .starting
         activeRequestID = requestID
+        activeTranscriptionMode = mode
         clearResult(keepingRequest: true)
         markStateChanged()
 
@@ -221,7 +244,9 @@ final class AppModel: ObservableObject {
         }
 
         bridgeStatus = .transcribing
-        statusText = "Transcribing…"
+        statusText = activeTranscriptionMode == .smart
+            ? "Transcribing and organizing…"
+            : "Transcribing…"
         markStateChanged()
 
         if deactivateMicrophoneAfterCapture {
@@ -234,11 +259,26 @@ final class AppModel: ObservableObject {
 
         do {
             let credential = try await auth.validCredential()
-            let text = try await transcriber.transcribe(
+            let rawText = try await transcriber.transcribe(
                 audioURL: url,
                 credential: credential,
                 language: "zh"
             )
+            let text: String
+            if activeTranscriptionMode == .smart {
+                do {
+                    text = try await cleanupService.clean(
+                        transcript: rawText,
+                        credential: credential
+                    )
+                } catch {
+                    // Never lose a valid transcription because the optional
+                    // cleanup pass is temporarily unavailable.
+                    text = rawText
+                }
+            } else {
+                text = rawText
+            }
             responseText = text
             resultCreatedAt = Date()
             bridgeError = nil
@@ -319,7 +359,7 @@ final class AppModel: ObservableObject {
         case .starting, .idle:
             activeRequestID = nil
             bridgeStatus = .idle
-            statusText = "Waiting for VoiceKey keyboard"
+            statusText = "Waiting for VoiceKing keyboard"
         case .recording:
             break
         case .transcribing:
@@ -327,7 +367,7 @@ final class AppModel: ObservableObject {
         case .completed:
             statusText = "Keyboard closed. Transcription is ready."
         case .error:
-            statusText = "Waiting for VoiceKey keyboard"
+            statusText = "Waiting for VoiceKing keyboard"
         }
     }
 
@@ -341,7 +381,7 @@ final class AppModel: ObservableObject {
         if serviceReady {
             statusText = audio.isRunning
                 ? "Ready for keyboard dictation"
-                : "Waiting for VoiceKey keyboard"
+                : "Waiting for VoiceKing keyboard"
         }
         markStateChanged()
     }
@@ -382,5 +422,11 @@ final class AppModel: ObservableObject {
 
     private func markStateChanged() {
         stateRevision &+= 1
+    }
+
+    private func returnToPreviousApp() {
+        let selector = NSSelectorFromString("suspend")
+        guard UIApplication.shared.responds(to: selector) else { return }
+        UIApplication.shared.perform(selector)
     }
 }

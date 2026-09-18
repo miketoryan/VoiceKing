@@ -8,7 +8,7 @@ struct ChatGPTTranscriptionService {
         credential: ChatGPTAuthManager.Credential,
         language: String = "zh"
     ) async throws -> String {
-        let boundary = "VoiceKey-\(UUID().uuidString)"
+        let boundary = "VoiceKing-\(UUID().uuidString)"
         let multipartURL = try makeMultipartBodyFile(
             audioURL: audioURL,
             language: language,
@@ -59,7 +59,7 @@ struct ChatGPTTranscriptionService {
         boundary: String
     ) throws -> URL {
         let bodyURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("voicekey-upload-\(UUID().uuidString)")
+            .appendingPathComponent("voiceking-upload-\(UUID().uuidString)")
             .appendingPathExtension("multipart")
 
         guard FileManager.default.createFile(atPath: bodyURL.path, contents: nil) else {
@@ -106,7 +106,7 @@ struct ChatGPTTranscriptionService {
         var errorDescription: String? {
             switch self {
             case .invalidResponse: "Invalid transcription response."
-            case .authenticationExpired: "ChatGPT authorization expired. Open VoiceKey and sign in again."
+            case .authenticationExpired: "ChatGPT authorization expired. Open VoiceKing and sign in again."
             case .rateLimited: "ChatGPT transcription is temporarily rate limited."
             case .http(let status, let detail):
                 detail.isEmpty ? "Transcription failed (HTTP \(status))." : "Transcription failed (HTTP \(status)): \(detail)"

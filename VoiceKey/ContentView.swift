@@ -52,15 +52,20 @@ struct ContentView: View {
                 Section("Setup") {
                     Text("1. Sign in with ChatGPT.")
                     Text("2. Start Keyboard Service once after installing or restarting the phone.")
-                    Text("3. Go to Settings → General → Keyboard → Keyboards → Add New Keyboard → VoiceKey.")
-                    Text("4. Enable Allow Full Access for VoiceKey.")
-                    Text("5. In any text field, switch to VoiceKey with the globe key and tap the microphone.")
+                    Text("3. Go to Settings → General → Keyboard → Keyboards → Add New Keyboard → VoiceKing.")
+                    Text("4. Enable Allow Full Access for VoiceKing.")
+                    Text("5. In any text field, switch to VoiceKing, choose a mode, and tap the microphone.")
+                }
+
+                Section("Transcription modes") {
+                    Text("Smart Cleanup (default): adds punctuation and paragraphs, removes filler and repetition, and fixes obvious wording problems without changing meaning or adding information.")
+                    Text("Verbatim: returns the transcription with no second-pass rewriting.")
                 }
 
                 Section("Privacy & limitations") {
-                    Text("VoiceKey automatically activates the microphone when its keyboard appears.")
-                    Text("VoiceKey closes the microphone 10 seconds after its keyboard is dismissed or you switch to another keyboard, then keeps a silent background audio session so it can reactivate automatically next time.")
-                    Text("The silent background session may use a small amount of battery and may appear as audio activity in iOS.")
+                    Text("VoiceKing closes the microphone about 10 seconds after its keyboard is dismissed or you switch to another keyboard.")
+                    Text("If iOS suspends the service, tapping the keyboard microphone briefly opens VoiceKing, starts the service, returns to the previous input field, and begins recording automatically.")
+                    Text("Smart Cleanup sends the raw transcription through a second ChatGPT/Codex text request. If that request is unavailable, VoiceKing safely returns the raw transcription instead.")
                     Text("The current ChatGPT/Codex transcription endpoint is undocumented and may change.")
                 }
 
@@ -71,7 +76,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationTitle("VoiceKey")
+            .navigationTitle("VoiceKing")
         }
     }
 }
