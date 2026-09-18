@@ -1,6 +1,14 @@
 # VoiceKing
 
-VoiceKing is an experimental, personal-use iPhone voice keyboard. It records through the containing app, transcribes with ChatGPT/Codex, optionally cleans up the transcript, and inserts the result into the active text field.
+VoiceKing is an experimental, personal-use iPhone voice and text keyboard. It provides a QWERTY keyboard with Chinese Pinyin candidates and English completion, records through the containing app, transcribes with ChatGPT/Codex, optionally cleans up the transcript, and inserts the result into the active text field.
+
+## Text keyboard
+
+- **Chinese** — type continuous Pinyin, tap a candidate, or press space to choose the first candidate. The bundled dictionary works offline.
+- **English** — QWERTY input with Shift and completions from the iOS spelling and supplementary lexicons.
+- **Editing** — delete, punctuation, space, and return stay available after a voice result is inserted, so correction does not require switching keyboards.
+- **Language sync** — the in-keyboard 中/EN key switches immediately. The containing app's Settings tab controls the default language and the speech-recognition language.
+- **Dictionary updates** — with Full Access and a network connection, the keyboard checks the official Apache-2.0 Rime Pinyin dictionary for an update every seven days. Failed updates silently fall back to the bundled data. Frequently selected Chinese candidates receive a local ranking boost.
 
 ## Modes
 
@@ -12,7 +20,7 @@ The selected mode is stored by the keyboard. Smart Cleanup first calls the trans
 ## Architecture
 
 - **VoiceKing app** — ChatGPT OAuth, microphone permission, background audio session, transcription, and smart cleanup.
-- **VoiceKingKeyboard extension** — mode selector, microphone/start/stop UI, app wake-up, and text insertion.
+- **VoiceKingKeyboard extension** — Chinese/English QWERTY input, local candidate ranking, mode selector, microphone/start/stop UI, app wake-up, and text insertion.
 - **Localhost bridge** — the keyboard talks to the app through `127.0.0.1:14557`, avoiding the App Group entitlement unavailable to free Apple developer accounts.
 
 The containing app records on behalf of the keyboard because iOS keyboard extensions cannot access the microphone directly. Recordings have no fixed duration limit and are uploaded through a temporary multipart file instead of being copied fully into memory.
@@ -36,9 +44,11 @@ For a local build, install Xcode 26+ and XcodeGen, run `xcodegen generate`, and 
 1. Open VoiceKing, sign in with ChatGPT, and tap **Start Keyboard Service** once.
 2. In Settings → General → Keyboard → Keyboards, add VoiceKing and enable **Allow Full Access**.
 3. Switch to VoiceKing from the globe key in any text field.
-4. Choose **智能整理** or **原文模式**. 智能整理 is selected by default.
-5. Tap the microphone to start; tap again to finish and insert the result.
-6. After leaving the keyboard, the microphone closes in about 10 seconds. If the service is sleeping next time, tapping the microphone performs the wake-and-return flow automatically.
+4. Use **中/EN** for Chinese Pinyin or English typing. Settings in the app controls the default.
+5. Choose **智能整理** or **原文模式**. 智能整理 is selected by default.
+6. Tap the microphone to start; tap again to finish and insert the result.
+7. Correct the result directly with the QWERTY keyboard.
+8. After leaving the keyboard, the microphone closes in about 10 seconds. If the service is sleeping next time, tapping the microphone performs the wake-and-return flow automatically.
 
 ## Limitations
 
@@ -46,7 +56,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and can change
 
 ## Status
 
-v0.2 — VoiceKing naming, dual transcription modes, strict smart cleanup, and keyboard-triggered service recovery.
+v0.3 test — Chinese/English QWERTY input, online-updatable offline Pinyin data, local candidate learning, simplified app navigation, synchronized language settings, and a VK app icon.
 
 ## Acknowledgements
 

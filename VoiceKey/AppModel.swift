@@ -9,6 +9,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var serviceReady = false
     @Published private(set) var statusText = "Idle"
     @Published var lastError: String?
+    @Published var preferredKeyboardLanguage: KeyboardLanguage {
+        didSet {
+            UserDefaults.standard.set(
+                preferredKeyboardLanguage.rawValue,
+                forKey: Defaults.keyboardLanguage
+            )
+            markStateChanged()
+        }
+    }
 
     private let auth: ChatGPTAuthManager
     private let audio = AudioService()
@@ -21,6 +30,7 @@ final class AppModel: ObservableObject {
     private var activeRecordingURL: URL?
     private var activeRequestID: String?
     private var activeTranscriptionMode: TranscriptionMode = .smart
+    private var activeRecognitionLanguage: KeyboardLanguage = .chinese
     private var bridgeStatus: BridgeStatus = .idle
     private var responseText: String?
     private var resultCreatedAt: Date?
@@ -30,7 +40,14 @@ final class AppModel: ObservableObject {
     private var keyboardMonitorTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
 
+    private enum Defaults {
+        static let keyboardLanguage = "voiceking.keyboard-language"
+    }
+
     init() {
+        preferredKeyboardLanguage = KeyboardLanguage(
+            rawValue: UserDefaults.standard.string(forKey: Defaults.keyboardLanguage) ?? ""
+        ) ?? .chinese
         let auth = ChatGPTAuthManager()
         self.auth = auth
         self.signedIn = auth.isSignedIn
@@ -153,7 +170,8 @@ final class AppModel: ObservableObject {
             activateMicrophoneForKeyboardIfNeeded()
             startRecordingFromKeyboard(
                 requestID: request.requestID,
-                mode: request.mode ?? .smart
+                mode: request.mode ?? .smart,
+                language: request.language ?? preferredKeyboardLanguage
             )
 
         case .stopRecording:
@@ -165,6 +183,11 @@ final class AppModel: ObservableObject {
 
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
+
+        case .setKeyboardLanguage:
+            if let language = request.language {
+                preferredKeyboardLanguage = language
+            }
         }
 
         return currentBridgeState()
@@ -192,7 +215,8 @@ final class AppModel: ObservableObject {
 
     private func startRecordingFromKeyboard(
         requestID: String?,
-        mode: TranscriptionMode
+        mode: TranscriptionMode,
+        language: KeyboardLanguage
     ) {
         guard serviceReady, audio.isRunning else {
             publishError(
@@ -214,6 +238,7 @@ final class AppModel: ObservableObject {
         bridgeStatus = .starting
         activeRequestID = requestID
         activeTranscriptionMode = mode
+        activeRecognitionLanguage = language
         clearResult(keepingRequest: true)
         markStateChanged()
 
@@ -262,7 +287,7 @@ final class AppModel: ObservableObject {
             let rawText = try await transcriber.transcribe(
                 audioURL: url,
                 credential: credential,
-                language: "zh"
+                language: activeRecognitionLanguage == .chinese ? "zh" : "en"
             )
             let text: String
             if activeTranscriptionMode == .smart {
@@ -416,7 +441,8 @@ final class AppModel: ObservableObject {
             requestID: activeRequestID,
             transcribedText: responseText,
             resultCreatedAt: resultCreatedAt,
-            lastError: bridgeError
+            lastError: bridgeError,
+            preferredKeyboardLanguage: preferredKeyboardLanguage
         )
     }
 
