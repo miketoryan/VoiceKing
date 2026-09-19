@@ -110,15 +110,28 @@ final class AppModel: ObservableObject {
 
     func startService() async {
         await startService(armingMicrophoneBeforeReturn: false)
+        guard serviceReady else { return }
+        await startPictureInPictureIfPossible()
     }
 
     func enableSkipAppSwitching() async {
         lastError = nil
 
         if !serviceReady {
-            await startService()
+            await startService(armingMicrophoneBeforeReturn: false)
             guard serviceReady else { return }
         }
+
+        await startPictureInPictureIfPossible()
+    }
+
+    private func startPictureInPictureIfPossible() async {
+        guard pictureInPictureSupported else {
+            statusText = "当前设备不支持免跳转模式"
+            markStateChanged()
+            return
+        }
+        guard !pictureInPictureActive else { return }
 
         do {
             try audio.enterPictureInPictureStandby()
@@ -340,10 +353,12 @@ final class AppModel: ObservableObject {
     }
 
     private static func isTransientAudioSessionError(_ error: Error) -> Bool {
-        // AVAudioSession.ErrorCode.cannotInterruptOthers is the four-character
-        // OSStatus "!int". It commonly occurs for a brief moment while iOS is
-        // moving from the host app to a custom keyboard.
-        (error as NSError).code == 560_557_684
+        // iOS can briefly reject an audio transition while moving between a
+        // host app, PiP and a keyboard extension. Retry the known transient
+        // "cannot interrupt others" error and CoreAudio's unspecified 'what'
+        // error seen on real-device background microphone startup.
+        let code = (error as NSError).code
+        return code == 560_557_684 || code == 2_003_329_396
     }
 
     private func startRecordingFromKeyboard(
@@ -582,6 +597,7 @@ final class AppModel: ObservableObject {
             revision: stateRevision,
             serviceReady: serviceReady,
             skipAppSwitchingReady: pictureInPictureActive,
+            microphoneReady: audio.isRunning,
             status: bridgeStatus,
             requestID: activeRequestID,
             transcribedText: responseText,
