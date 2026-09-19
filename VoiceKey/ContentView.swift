@@ -62,7 +62,7 @@ private struct HomeView: View {
                     if model.serviceReady {
                         Button("停止键盘服务", role: .destructive) { model.stopService() }
                     } else {
-                        Button("启动键盘服务") {
+                        Button("启动免跳转服务") {
                             Task { await model.startService() }
                         }
                         .disabled(!model.signedIn)
@@ -70,9 +70,6 @@ private struct HomeView: View {
                 }
 
                 Section("免跳转录音") {
-                    PiPPreviewView(service: model.pictureInPictureService)
-                        .frame(height: 140)
-
                     LabeledContent("状态") {
                         Label(
                             model.pictureInPictureActive ? "已开启" : "未开启",
@@ -105,6 +102,9 @@ private struct HomeView: View {
                             .font(.footnote)
                             .foregroundStyle(.red)
                     }
+
+                    PiPPreviewView(service: model.pictureInPictureService)
+                        .frame(height: 120)
                 }
             }
             .navigationTitle("VoiceKing")
@@ -156,7 +156,7 @@ private struct HelpView: View {
         NavigationStack {
             Form {
                 Section("首次设置") {
-                    Text("1. 在首页登录 ChatGPT 并启动键盘服务。")
+                    Text("1. 在首页登录 ChatGPT 并点击“启动免跳转服务”；VoiceKing 会自动尝试开启画中画。")
                     Text("2. 打开 iPhone 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → VoiceKing。")
                     Text("3. 打开 VoiceKing 的“允许完全访问”。")
                 }
