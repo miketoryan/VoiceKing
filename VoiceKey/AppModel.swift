@@ -109,9 +109,11 @@ final class AppModel: ObservableObject {
     }
 
     func startService() async {
+        // Normal startup mirrors the observed Typeless flow: keep the bridge
+        // alive, but do not require or automatically show Picture in Picture.
+        // When the keyboard needs the microphone it performs a very short
+        // foreground wake, starts capture there, and immediately returns.
         await startService(armingMicrophoneBeforeReturn: false)
-        guard serviceReady else { return }
-        await startPictureInPictureIfPossible()
     }
 
     func enableSkipAppSwitching() async {
@@ -232,7 +234,9 @@ final class AppModel: ObservableObject {
             )
         }
 
-        try? await Task.sleep(for: .milliseconds(350))
+        // Return as soon as capture is confirmed. A long artificial delay makes
+        // the app flash much more visibly than Typeless.
+        try? await Task.sleep(for: .milliseconds(80))
         if let returnBundleIdentifier,
            openHostApplication(bundleIdentifier: returnBundleIdentifier) {
             return
