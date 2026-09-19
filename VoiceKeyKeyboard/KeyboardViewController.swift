@@ -277,6 +277,7 @@ final class KeyboardViewController: UIInputViewController {
             serverID: latestState.serverID,
             revision: latestState.revision &+ 1,
             serviceReady: true,
+            skipAppSwitchingReady: latestState.skipAppSwitchingReady,
             status: .starting,
             requestID: requestID,
             transcribedText: nil,
@@ -320,7 +321,7 @@ final class KeyboardViewController: UIInputViewController {
     private func refreshUI() {
         guard hasFullAccess else {
             statusLabel.text = "需要允许完全访问"
-            applyMicStyle(title: "开启完全访问", color: .systemGray)
+            applyMicStyle(title: "开启完全访问", symbol: "mic.slash", color: .systemGray)
             return
         }
 
@@ -329,13 +330,13 @@ final class KeyboardViewController: UIInputViewController {
            latestState.isFreshResponse(for: requestID),
            latestState.transcribedText != nil {
             statusLabel.text = "识别完成，点击插入"
-            applyMicStyle(title: "插入识别结果", color: .systemGreen)
+            applyMicStyle(title: "插入识别结果", symbol: "text.badge.checkmark", color: .systemGreen)
             return
         }
 
         guard latestState.serviceReady else {
-            statusLabel.text = latestState.lastError ?? "VoiceKing 服务休眠"
-            applyMicStyle(title: "🎙 唤醒并开始说话", color: .systemGray)
+            statusLabel.text = latestState.lastError ?? "服务休眠，点语音按钮会短暂打开 VoiceKing"
+            applyMicStyle(title: "唤醒并开始说话", symbol: "mic", color: .systemGray)
             return
         }
 
@@ -345,28 +346,38 @@ final class KeyboardViewController: UIInputViewController {
 
         switch latestState.status {
         case .idle:
-            statusLabel.text = "\(languageName) · 就绪"
-            applyMicStyle(title: "🎙 开始说话", color: .systemBlue)
+            if latestState.skipAppSwitchingReady {
+                statusLabel.text = "\(languageName) · 免跳转就绪"
+                applyMicStyle(title: "开始说话", symbol: "mic.fill", color: .systemBlue)
+            } else {
+                statusLabel.text = "\(languageName) · 普通模式"
+                applyMicStyle(title: "开始说话", symbol: "mic", color: .systemBlue)
+            }
         case .starting:
-            statusLabel.text = "正在连接 VoiceKing…"
-            applyMicStyle(title: "正在启动…", color: .systemGray)
+            statusLabel.text = "正在打开麦克风…"
+            applyMicStyle(title: "正在启动…", symbol: "mic", color: .systemGray)
         case .recording:
             statusLabel.text = "录音中，再点一次结束"
-            applyMicStyle(title: "⏹ 结束录音", color: .systemRed)
+            applyMicStyle(title: "结束录音", symbol: "stop.fill", color: .systemRed)
         case .transcribing:
             statusLabel.text = "ChatGPT 正在识别…"
-            applyMicStyle(title: "正在处理…", color: .systemGray)
+            applyMicStyle(title: "正在处理…", symbol: "waveform", color: .systemGray)
         case .completed:
             statusLabel.text = "识别结果已过期"
-            applyMicStyle(title: "🎙 开始说话", color: .systemBlue)
+            applyMicStyle(
+                title: "开始说话",
+                symbol: latestState.skipAppSwitchingReady ? "mic.fill" : "mic",
+                color: .systemBlue
+            )
         case .error:
             statusLabel.text = latestState.lastError ?? "识别失败"
-            applyMicStyle(title: "🎙 重试", color: .systemOrange)
+            applyMicStyle(title: "重试", symbol: "mic", color: .systemOrange)
         }
     }
 
-    private func applyMicStyle(title: String, color: UIColor) {
-        micButton.setTitle(title, for: .normal)
+    private func applyMicStyle(title: String, symbol: String, color: UIColor) {
+        micButton.setTitle("  \(title)  ", for: .normal)
+        micButton.setImage(UIImage(systemName: symbol), for: .normal)
         micButton.backgroundColor = color
     }
 
@@ -399,6 +410,7 @@ final class KeyboardViewController: UIInputViewController {
             serverID: latestState.serverID,
             revision: latestState.revision &+ 1,
             serviceReady: latestState.serviceReady,
+            skipAppSwitchingReady: latestState.skipAppSwitchingReady,
             status: .idle,
             requestID: nil,
             transcribedText: nil,
@@ -420,7 +432,7 @@ final class KeyboardViewController: UIInputViewController {
         guard !pendingAutoRecordingAfterLaunch else { return }
         pendingAutoRecordingAfterLaunch = true
         statusLabel.text = "正在启动 VoiceKing…"
-        applyMicStyle(title: "正在打开 App…", color: .systemGray)
+        applyMicStyle(title: "正在打开 App…", symbol: "mic", color: .systemGray)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
