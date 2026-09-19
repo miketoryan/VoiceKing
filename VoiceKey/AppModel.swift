@@ -10,12 +10,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var statusText = "Idle"
     @Published private(set) var handoffActive = false
     @Published var lastError: String?
-    @Published var preferredKeyboardLanguage: KeyboardLanguage {
+    @Published var interfaceLanguage: InterfaceLanguage {
         didSet {
             UserDefaults.standard.set(
-                preferredKeyboardLanguage.rawValue,
-                forKey: Defaults.keyboardLanguage
+                interfaceLanguage.rawValue,
+                forKey: Defaults.interfaceLanguage
             )
+            refreshStatusText()
             markStateChanged()
         }
     }
@@ -31,7 +32,6 @@ final class AppModel: ObservableObject {
     private var activeRecordingURL: URL?
     private var activeRequestID: String?
     private var activeTranscriptionMode: TranscriptionMode = .smart
-    private var activeRecognitionLanguage: KeyboardLanguage = .chinese
     private var bridgeStatus: BridgeStatus = .idle
     private var responseText: String?
     private var resultCreatedAt: Date?
@@ -43,12 +43,12 @@ final class AppModel: ObservableObject {
     private var audioActivationTask: Task<Bool, Never>?
 
     private enum Defaults {
-        static let keyboardLanguage = "voiceking.keyboard-language"
+        static let interfaceLanguage = "voiceking.interface-language"
     }
 
     init() {
-        preferredKeyboardLanguage = KeyboardLanguage(
-            rawValue: UserDefaults.standard.string(forKey: Defaults.keyboardLanguage) ?? ""
+        interfaceLanguage = InterfaceLanguage(
+            rawValue: UserDefaults.standard.string(forKey: Defaults.interfaceLanguage) ?? ""
         ) ?? .chinese
 
 
@@ -56,6 +56,7 @@ final class AppModel: ObservableObject {
         self.auth = auth
         self.signedIn = auth.isSignedIn
         self.accountEmail = auth.credential?.email
+        self.statusText = interfaceLanguage.text(chinese: "空闲", english: "Idle")
 
 
         do {
@@ -67,7 +68,7 @@ final class AppModel: ObservableObject {
             }
         } catch {
             lastError = error.localizedDescription
-            statusText = "Local keyboard connection failed"
+            statusText = ui("键盘本地连接失败", "Local keyboard connection failed")
         }
     }
 
@@ -126,6 +127,14 @@ final class AppModel: ObservableObject {
             audioActivationTask?.cancel()
             audioActivationTask = nil
 
+            // A previous request can be abandoned if the keyboard extension is
+            // killed during an app handoff. Always clear that capture before a
+            // foreground recovery so the new request starts from a clean file.
+            if let staleURL = audio.endCapture() ?? activeRecordingURL {
+                try? FileManager.default.removeItem(at: staleURL)
+            }
+            audio.disarm()
+
             try await performAudioOperationWithRetry {
                 if armingMicrophoneBeforeReturn {
                     try audio.arm()
@@ -135,8 +144,8 @@ final class AppModel: ObservableObject {
             }
             serviceReady = true
             statusText = armingMicrophoneBeforeReturn
-                ? "Ready for keyboard dictation"
-                : "Waiting for VoiceKing keyboard"
+                ? ui("已准备好语音输入", "Ready for keyboard dictation")
+                : ui("等待 VoiceKing 键盘", "Waiting for VoiceKing keyboard")
             activeRecordingURL = nil
             activeRequestID = nil
             bridgeStatus = .idle
@@ -168,10 +177,6 @@ final class AppModel: ObservableObject {
         let mode = queryItems.first(where: {
             $0.name == "mode"
         })?.value.flatMap(TranscriptionMode.init(rawValue:)) ?? .smart
-        let language = queryItems.first(where: {
-            $0.name == "language"
-        })?.value.flatMap(KeyboardLanguage.init(rawValue:)) ?? preferredKeyboardLanguage
-
         // Fallback path: start the *actual recording file* while VoiceKing is
         // in the foreground, then return to the host app. This avoids the real-
         // device failure where AVAudioEngine reported "recording" after the
@@ -186,8 +191,7 @@ final class AppModel: ObservableObject {
         if let requestID, !requestID.isEmpty {
             startRecordingFromKeyboard(
                 requestID: requestID,
-                mode: mode,
-                language: language
+                mode: mode
             )
         }
 
@@ -205,8 +209,8 @@ final class AppModel: ObservableObject {
 
         handoffActive = false
         statusText = returnBundleIdentifier == nil
-            ? "未识别原输入 App，请手动返回"
-            : "系统未允许自动返回，请手动返回"
+            ? ui("未识别原输入 App，请手动返回", "Could not identify the previous app. Return manually.")
+            : ui("系统未允许自动返回，请手动返回", "iOS blocked automatic return. Return manually.")
         markStateChanged()
     }
 
@@ -226,7 +230,7 @@ final class AppModel: ObservableObject {
         audio.disarm()
         handoffActive = false
         serviceReady = false
-        statusText = "Idle"
+        statusText = ui("空闲", "Idle")
         bridgeStatus = .idle
         clearResult()
         lastKeyboardHeartbeat = nil
@@ -247,8 +251,7 @@ final class AppModel: ObservableObject {
             if await activateMicrophoneForRecording() {
                 startRecordingFromKeyboard(
                     requestID: request.requestID,
-                    mode: request.mode ?? .smart,
-                    language: request.language ?? preferredKeyboardLanguage
+                    mode: request.mode ?? .smart
                 )
             }
 
@@ -262,10 +265,6 @@ final class AppModel: ObservableObject {
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
 
-        case .setKeyboardLanguage:
-            if let language = request.language {
-                preferredKeyboardLanguage = language
-            }
         }
 
         return currentBridgeState()
@@ -299,7 +298,7 @@ final class AppModel: ObservableObject {
                     self.audio.disarm()
                     return false
                 }
-                self.statusText = "Ready for keyboard dictation"
+                self.statusText = self.ui("已准备好语音输入", "Ready for keyboard dictation")
                 self.lastError = nil
                 self.bridgeError = nil
                 self.markStateChanged()
@@ -330,7 +329,7 @@ final class AppModel: ObservableObject {
                     throw error
                 }
                 retry += 1
-                statusText = "Waiting for the microphone…"
+                statusText = ui("正在等待麦克风…", "Waiting for the microphone…")
                 try await Task.sleep(for: .milliseconds(150 * retry))
             }
         }
@@ -347,8 +346,7 @@ final class AppModel: ObservableObject {
 
     private func startRecordingFromKeyboard(
         requestID: String?,
-        mode: TranscriptionMode,
-        language: KeyboardLanguage
+        mode: TranscriptionMode
     ) {
         guard serviceReady, audio.isRunning else {
             publishError(
@@ -370,14 +368,13 @@ final class AppModel: ObservableObject {
         bridgeStatus = .starting
         activeRequestID = requestID
         activeTranscriptionMode = mode
-        activeRecognitionLanguage = language
         clearResult(keepingRequest: true)
         markStateChanged()
 
         do {
             activeRecordingURL = try audio.beginCapture()
             bridgeStatus = .recording
-            statusText = "Recording…"
+            statusText = ui("录音中…", "Recording…")
             startKeyboardMonitor()
             markStateChanged()
         } catch {
@@ -403,8 +400,8 @@ final class AppModel: ObservableObject {
 
         bridgeStatus = .transcribing
         statusText = activeTranscriptionMode == .smart
-            ? "Transcribing and organizing…"
-            : "Transcribing…"
+            ? ui("正在识别并智能整理…", "Transcribing and organizing…")
+            : ui("正在识别…", "Transcribing…")
         markStateChanged()
 
         if deactivateMicrophoneAfterCapture {
@@ -425,8 +422,7 @@ final class AppModel: ObservableObject {
             let credential = try await auth.validCredential()
             let rawText = try await transcriber.transcribe(
                 audioURL: url,
-                credential: credential,
-                language: activeRecognitionLanguage == .chinese ? "zh" : "en"
+                credential: credential
             )
             let text: String
             if activeTranscriptionMode == .smart {
@@ -448,15 +444,15 @@ final class AppModel: ObservableObject {
             bridgeError = nil
             bridgeStatus = .completed
             statusText = audio.isRunning
-                ? "Ready for keyboard dictation"
-                : "Keyboard closed. Transcription is ready."
+                ? ui("已准备好语音输入", "Ready for keyboard dictation")
+                : ui("键盘已关闭，识别结果已就绪", "Keyboard closed. Transcription is ready.")
             signedIn = true
             accountEmail = credential.email
             markStateChanged()
         } catch {
             guard !Task.isCancelled else { return }
             publishError(error.localizedDescription, requestID: requestID)
-            statusText = "Transcription failed"
+            statusText = ui("识别失败", "Transcription failed")
         }
     }
 
@@ -523,15 +519,15 @@ final class AppModel: ObservableObject {
         case .starting, .idle:
             activeRequestID = nil
             bridgeStatus = .idle
-            statusText = "Waiting for VoiceKing keyboard"
+            statusText = ui("等待 VoiceKing 键盘", "Waiting for VoiceKing keyboard")
         case .recording:
             break
         case .transcribing:
-            statusText = "Keyboard closed. Finishing transcription…"
+            statusText = ui("键盘已关闭，正在完成识别…", "Keyboard closed. Finishing transcription…")
         case .completed:
-            statusText = "Keyboard closed. Transcription is ready."
+            statusText = ui("键盘已关闭，识别结果已就绪", "Keyboard closed. Transcription is ready.")
         case .error:
-            statusText = "Waiting for VoiceKing keyboard"
+            statusText = ui("等待 VoiceKing 键盘", "Waiting for VoiceKing keyboard")
         }
     }
 
@@ -544,8 +540,8 @@ final class AppModel: ObservableObject {
         }
         if serviceReady {
             statusText = audio.isRunning
-                ? "Ready for keyboard dictation"
-                : "Waiting for VoiceKing keyboard"
+                ? ui("已准备好语音输入", "Ready for keyboard dictation")
+                : ui("等待 VoiceKing 键盘", "Waiting for VoiceKing keyboard")
         }
         markStateChanged()
     }
@@ -582,12 +578,42 @@ final class AppModel: ObservableObject {
             transcribedText: responseText,
             resultCreatedAt: resultCreatedAt,
             lastError: bridgeError,
-            preferredKeyboardLanguage: preferredKeyboardLanguage
+            interfaceLanguage: interfaceLanguage
         )
     }
 
     private func prepareStandbyAudio() throws {
         try audio.enterStandby()
+    }
+
+    private func ui(_ chinese: String, _ english: String) -> String {
+        interfaceLanguage.text(chinese: chinese, english: english)
+    }
+
+    private func refreshStatusText() {
+        guard serviceReady else {
+            statusText = ui("空闲", "Idle")
+            return
+        }
+
+        switch bridgeStatus {
+        case .idle:
+            statusText = audio.isRunning
+                ? ui("已准备好语音输入", "Ready for keyboard dictation")
+                : ui("等待 VoiceKing 键盘", "Waiting for VoiceKing keyboard")
+        case .starting:
+            statusText = ui("正在打开麦克风…", "Starting microphone…")
+        case .recording:
+            statusText = ui("录音中…", "Recording…")
+        case .transcribing:
+            statusText = activeTranscriptionMode == .smart
+                ? ui("正在识别并智能整理…", "Transcribing and organizing…")
+                : ui("正在识别…", "Transcribing…")
+        case .completed:
+            statusText = ui("识别结果已就绪", "Transcription is ready")
+        case .error:
+            statusText = bridgeError ?? ui("识别失败", "Transcription failed")
+        }
     }
 
     private func markStateChanged() {
@@ -645,7 +671,10 @@ final class AppModel: ObservableObject {
             guard !success else { return }
             Task { @MainActor in
                 self?.handoffActive = false
-                self?.statusText = "系统未允许自动返回，请手动返回"
+                self?.statusText = self?.ui(
+                    "系统未允许自动返回，请手动返回",
+                    "iOS blocked automatic return. Return manually."
+                ) ?? "iOS blocked automatic return. Return manually."
                 self?.lastError = error?.localizedDescription
                 self?.markStateChanged()
             }

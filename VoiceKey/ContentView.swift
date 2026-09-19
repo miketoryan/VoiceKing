@@ -3,20 +3,28 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var model: AppModel
 
+    private var language: InterfaceLanguage { model.interfaceLanguage }
+
     var body: some View {
         Group {
             if model.handoffActive {
-                HandoffView()
+                HandoffView(language: language)
             } else {
                 TabView {
                     HomeView(model: model)
-                        .tabItem { Label("首页", systemImage: "house.fill") }
+                        .tabItem {
+                            Label(language.text(chinese: "首页", english: "Home"), systemImage: "house.fill")
+                        }
 
                     SettingsView(model: model)
-                        .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                        .tabItem {
+                            Label(language.text(chinese: "设置", english: "Settings"), systemImage: "gearshape.fill")
+                        }
 
-                    HelpView()
-                        .tabItem { Label("说明", systemImage: "book.closed.fill") }
+                    HelpView(language: language)
+                        .tabItem {
+                            Label(language.text(chinese: "说明", english: "Help"), systemImage: "book.closed.fill")
+                        }
                 }
             }
         }
@@ -24,6 +32,8 @@ struct ContentView: View {
 }
 
 private struct HandoffView: View {
+    let language: InterfaceLanguage
+
     var body: some View {
         VStack(spacing: 16) {
             ZStack {
@@ -44,7 +54,7 @@ private struct HandoffView: View {
             Text("VoiceKing")
                 .font(.title2.bold())
 
-            Text("正在启动语音输入…")
+            Text(language.text(chinese: "正在启动语音输入…", english: "Starting voice input…"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -56,31 +66,37 @@ private struct HandoffView: View {
 private struct HomeView: View {
     @ObservedObject var model: AppModel
 
+    private func t(_ chinese: String, _ english: String) -> String {
+        model.interfaceLanguage.text(chinese: chinese, english: english)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("GPT 账号") {
-                    LabeledContent("账号") {
-                        Text(model.signedIn ? (model.accountEmail ?? "已登录") : "未登录")
+                Section(t("GPT 账号", "GPT Account")) {
+                    LabeledContent(t("账号", "Account")) {
+                        Text(model.signedIn
+                             ? (model.accountEmail ?? t("已登录", "Signed in"))
+                             : t("未登录", "Not signed in"))
                             .foregroundStyle(.secondary)
                     }
 
                     if model.signedIn {
-                        Button("退出登录", role: .destructive) { model.signOut() }
+                        Button(t("退出登录", "Sign Out"), role: .destructive) {
+                            model.signOut()
+                        }
                     } else {
-                        Button("登录 ChatGPT") {
+                        Button(t("登录 ChatGPT", "Sign in to ChatGPT")) {
                             Task { await model.signIn() }
                         }
                     }
                 }
 
-                Section("软件状态") {
-                    LabeledContent("键盘服务") {
+                Section(t("软件状态", "Status")) {
+                    LabeledContent(t("键盘服务", "Keyboard Service")) {
                         Label(
-                            model.serviceReady ? "运行中" : "已停止",
-                            systemImage: model.serviceReady
-                                ? "checkmark.circle.fill"
-                                : "pause.circle"
+                            model.serviceReady ? t("运行中", "Running") : t("已停止", "Stopped"),
+                            systemImage: model.serviceReady ? "checkmark.circle.fill" : "pause.circle"
                         )
                         .foregroundStyle(model.serviceReady ? Color.green : Color.secondary)
                     }
@@ -96,9 +112,11 @@ private struct HomeView: View {
                     }
 
                     if model.serviceReady {
-                        Button("停止键盘服务", role: .destructive) { model.stopService() }
+                        Button(t("停止键盘服务", "Stop Keyboard Service"), role: .destructive) {
+                            model.stopService()
+                        }
                     } else {
-                        Button("启动键盘服务") {
+                        Button(t("启动键盘服务", "Start Keyboard Service")) {
                             Task { await model.startService() }
                         }
                         .disabled(!model.signedIn)
@@ -109,7 +127,7 @@ private struct HomeView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Spacer()
-                    Text("v0.3.9 · build 16")
+                    Text("v0.4.0 · build 17")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.trailing, 16)
@@ -123,71 +141,123 @@ private struct HomeView: View {
 private struct SettingsView: View {
     @ObservedObject var model: AppModel
 
+    private func t(_ chinese: String, _ english: String) -> String {
+        model.interfaceLanguage.text(chinese: chinese, english: english)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("语音识别语言") {
-                    Picker("识别语言", selection: $model.preferredKeyboardLanguage) {
-                        Text("中文").tag(KeyboardLanguage.chinese)
-                        Text("English").tag(KeyboardLanguage.english)
+                Section(t("界面语言", "Interface Language")) {
+                    Picker(t("界面语言", "Interface Language"), selection: $model.interfaceLanguage) {
+                        Text("中文").tag(InterfaceLanguage.chinese)
+                        Text("English").tag(InterfaceLanguage.english)
                     }
                     .pickerStyle(.segmented)
 
-                    Text("这里决定下一次语音输入使用中文识别还是英文识别。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    Text(t(
+                        "这里只控制 VoiceKing 软件和键盘提示文字。语音输入语言由 ChatGPT 自动识别，可直接混合使用中英文。",
+                        "This only changes VoiceKing's app and keyboard text. ChatGPT detects the spoken language automatically, including mixed Chinese and English."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
 
-                Section("语音模式") {
-                    LabeledContent("默认模式", value: "智能整理")
-                    Text("也可以直接在键盘顶部切换为“原文模式”。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                Section(t("语音模式", "Voice Mode")) {
+                    LabeledContent(t("默认模式", "Default"), value: t("智能整理", "Smart Cleanup"))
+                    Text(t(
+                        "也可以直接在键盘顶部切换为“原文模式”。",
+                        "You can switch to Verbatim directly from the keyboard."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
 
-                Section("麦克风") {
-                    Text("键盘空闲时麦克风保持关闭；点击语音后 VoiceKing 会短暂唤醒，在前台开始录音并立即返回，结束录音后关闭麦克风。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                Section(t("麦克风", "Microphone")) {
+                    Text(t(
+                        "VoiceKing 在后台运行时，键盘优先直接启动录音，不再切换到主程序；只有后台服务失效时才会自动唤醒主程序恢复。退出输入界面10秒后关闭麦克风。",
+                        "When VoiceKing is running in the background, the keyboard starts recording directly without switching apps. It wakes the main app only if background recovery is required. The microphone closes 10 seconds after leaving the input screen."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle(t("设置", "Settings"))
         }
     }
 }
 
 private struct HelpView: View {
+    let language: InterfaceLanguage
+
+    private func t(_ chinese: String, _ english: String) -> String {
+        language.text(chinese: chinese, english: english)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("首次设置") {
-                    Text("1. 在首页登录 ChatGPT。登录成功后会自动启动键盘服务。")
-                    Text("2. 打开 iPhone 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → VoiceKing。")
-                    Text("3. 打开 VoiceKing 的“允许完全访问”。")
+                Section(t("首次设置", "Initial Setup")) {
+                    Text(t(
+                        "1. 在首页登录 ChatGPT。登录成功后会自动启动键盘服务。",
+                        "1. Sign in to ChatGPT on the Home screen. The keyboard service starts automatically."
+                    ))
+                    Text(t(
+                        "2. 打开 iPhone 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → VoiceKing。",
+                        "2. Open iPhone Settings → General → Keyboard → Keyboards → Add New Keyboard → VoiceKing."
+                    ))
+                    Text(t(
+                        "3. 打开 VoiceKing 的“允许完全访问”。",
+                        "3. Enable Allow Full Access for VoiceKing."
+                    ))
                 }
 
-                Section("键盘使用") {
-                    Text("VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。")
-                    Text("点击麦克风后会短暂唤醒 VoiceKing；录音开始后自动返回当前输入 App。")
-                    Text("点击语音按钮开始录音，再点一次结束；识别完成后文字会自动插入当前输入框。")
-                    Text("键盘顶部可切换智能/原文与中英文；底部地球按钮切换输入法，换行按钮插入换行，删除按钮可修正文字。")
+                Section(t("键盘使用", "Using the Keyboard")) {
+                    Text(t(
+                        "VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。",
+                        "VoiceKing is voice-only and does not include Pinyin or QWERTY typing."
+                    ))
+                    Text(t(
+                        "后台服务正常时，点击麦克风会直接开始录音；服务失效时才短暂唤醒 VoiceKing 并自动返回。",
+                        "When the background service is available, tapping the microphone starts recording directly. VoiceKing briefly wakes and returns only when recovery is needed."
+                    ))
+                    Text(t(
+                        "再次点击结束录音；识别完成后文字直接插入当前输入框，不需要确认。",
+                        "Tap again to stop. The result is inserted automatically without confirmation."
+                    ))
+                    Text(t(
+                        "ChatGPT 自动判断输入语言；键盘顶部只保留智能/原文模式切换。",
+                        "ChatGPT detects the spoken language automatically. The keyboard only shows Smart/Verbatim mode selection."
+                    ))
                 }
 
-                Section("语音模式") {
-                    Text("智能整理（默认）：添加标点和分段，删除无意义口头语与重复内容，修正明显语病，但不改变原意、不新增信息。")
-                    Text("原文模式：只转录，尽量保留原话，适合会议和原始记录。")
+                Section(t("语音模式", "Voice Modes")) {
+                    Text(t(
+                        "智能整理（默认）：添加标点和分段，删除无意义口头语与重复内容，修正明显语病，但不改变原意、不新增信息。",
+                        "Smart Cleanup (default): adds punctuation and paragraphs, removes meaningless filler and repetition, and fixes obvious grammar without changing meaning or adding information."
+                    ))
+                    Text(t(
+                        "原文模式：只转录，尽量保留原话，适合会议和原始记录。",
+                        "Verbatim: transcription only, preserving the original wording for meetings and records."
+                    ))
                 }
 
-                Section("注意事项") {
-                    Text("语音转录和智能整理需要连接 ChatGPT；普通文字输入请切换到苹果自带键盘。")
-                    Text("VoiceKing 使用的 ChatGPT/Codex 接口未公开，未来可能变化。语音录音采用短暂打开 VoiceKing 并自动返回原 App 的方式。")
+                Section(t("注意事项", "Notes")) {
+                    Text(t(
+                        "语音转录和智能整理需要连接 ChatGPT；普通文字输入请切换到苹果自带键盘。",
+                        "Transcription and Smart Cleanup require ChatGPT. Use Apple's keyboard for regular typing."
+                    ))
+                    Text(t(
+                        "VoiceKing 不使用画中画或悬浮视频。",
+                        "VoiceKing does not use Picture in Picture or floating video."
+                    ))
                 }
 
-                Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.9 · build 16")
+                Section(t("版本", "Version")) {
+                    LabeledContent("VoiceKing", value: "0.4.0 · build 17")
                 }
             }
-            .navigationTitle("说明")
+            .navigationTitle(t("说明", "Help"))
         }
     }
 }

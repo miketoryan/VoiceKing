@@ -7,10 +7,16 @@ final class LocalBridgeServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.miketoryan.VoiceKing.local-bridge")
     private var listener: NWListener?
     private var handler: Handler?
+    private var shouldRun = false
 
     func start(handler: @escaping Handler) throws {
         stop()
         self.handler = handler
+        shouldRun = true
+        try startListener()
+    }
+
+    private func startListener() throws {
 
         guard let port = NWEndpoint.Port(rawValue: UInt16(LocalBridge.port)) else {
             throw ServerError.invalidPort
@@ -22,9 +28,14 @@ final class LocalBridgeServer: @unchecked Sendable {
         listener.newConnectionHandler = { [weak self] connection in
             self?.receiveRequest(on: connection, buffer: Data())
         }
-        listener.stateUpdateHandler = { state in
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self, let listener else { return }
             if case .failed = state {
                 listener.cancel()
+                if self.listener === listener {
+                    self.listener = nil
+                }
+                self.scheduleRestart()
             }
         }
         listener.start(queue: queue)
@@ -32,9 +43,22 @@ final class LocalBridgeServer: @unchecked Sendable {
     }
 
     func stop() {
+        shouldRun = false
         listener?.cancel()
         listener = nil
         handler = nil
+    }
+
+    private func scheduleRestart() {
+        guard shouldRun else { return }
+        queue.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.shouldRun, self.listener == nil else { return }
+            do {
+                try self.startListener()
+            } catch {
+                self.scheduleRestart()
+            }
+        }
     }
 
     private func receiveRequest(on connection: NWConnection, buffer: Data) {

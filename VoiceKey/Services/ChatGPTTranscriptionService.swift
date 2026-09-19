@@ -5,13 +5,11 @@ struct ChatGPTTranscriptionService {
 
     func transcribe(
         audioURL: URL,
-        credential: ChatGPTAuthManager.Credential,
-        language: String = "zh"
+        credential: ChatGPTAuthManager.Credential
     ) async throws -> String {
         let boundary = "VoiceKing-\(UUID().uuidString)"
         let multipartURL = try makeMultipartBodyFile(
             audioURL: audioURL,
-            language: language,
             boundary: boundary
         )
         defer { try? FileManager.default.removeItem(at: multipartURL) }
@@ -55,7 +53,6 @@ struct ChatGPTTranscriptionService {
 
     private func makeMultipartBodyFile(
         audioURL: URL,
-        language: String,
         boundary: String
     ) throws -> URL {
         let bodyURL = FileManager.default.temporaryDirectory
@@ -83,10 +80,7 @@ struct ChatGPTTranscriptionService {
             }
 
             try output.write(contentsOf: Data(
-                ("\r\n--\(boundary)\r\n" +
-                 "Content-Disposition: form-data; name=\"language\"\r\n\r\n" +
-                 "\(language)\r\n" +
-                 "--\(boundary)--\r\n").utf8
+                "\r\n--\(boundary)--\r\n".utf8
             ))
         } catch {
             try? FileManager.default.removeItem(at: bodyURL)

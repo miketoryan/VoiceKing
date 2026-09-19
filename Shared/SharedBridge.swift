@@ -2,7 +2,7 @@ import Foundation
 
 enum LocalBridge {
     static let port = 14_557
-    static let protocolVersion = "6"
+    static let protocolVersion = "7"
     static let keyboardHeartbeatInterval: Duration = .seconds(2)
     static let keyboardExitGracePeriod: TimeInterval = 10
     static let resultValidity: TimeInterval = 300
@@ -23,43 +23,36 @@ enum TranscriptionMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum KeyboardLanguage: String, Codable, CaseIterable, Sendable {
+enum InterfaceLanguage: String, Codable, CaseIterable, Sendable {
     case chinese
     case english
 
-    var displayName: String {
-        switch self {
-        case .chinese: "中文"
-        case .english: "English"
-        }
+    func text(chinese: String, english: String) -> String {
+        self == .chinese ? chinese : english
     }
 }
 
-enum BridgeAction: String, Codable, Sendable {
+enum BridgeAction: String, Codable, Sendable, Equatable {
     case state
     case heartbeat
     case startRecording
     case stopRecording
     case acknowledgeResult
-    case setKeyboardLanguage
 }
 
 struct BridgeRequest: Codable, Sendable {
     let action: BridgeAction
     let requestID: String?
     let mode: TranscriptionMode?
-    let language: KeyboardLanguage?
 
     init(
         action: BridgeAction,
         requestID: String? = nil,
-        mode: TranscriptionMode? = nil,
-        language: KeyboardLanguage? = nil
+        mode: TranscriptionMode? = nil
     ) {
         self.action = action
         self.requestID = requestID
         self.mode = mode
-        self.language = language
     }
 }
 
@@ -82,7 +75,7 @@ struct BridgeState: Codable, Sendable {
     let transcribedText: String?
     let resultCreatedAt: Date?
     let lastError: String?
-    let preferredKeyboardLanguage: KeyboardLanguage
+    let interfaceLanguage: InterfaceLanguage
 
     init(
         serverID: String?,
@@ -94,7 +87,7 @@ struct BridgeState: Codable, Sendable {
         transcribedText: String?,
         resultCreatedAt: Date?,
         lastError: String?,
-        preferredKeyboardLanguage: KeyboardLanguage = .chinese
+        interfaceLanguage: InterfaceLanguage = .chinese
     ) {
         self.serverID = serverID
         self.revision = revision
@@ -105,10 +98,13 @@ struct BridgeState: Codable, Sendable {
         self.transcribedText = transcribedText
         self.resultCreatedAt = resultCreatedAt
         self.lastError = lastError
-        self.preferredKeyboardLanguage = preferredKeyboardLanguage
+        self.interfaceLanguage = interfaceLanguage
     }
 
-    static func unavailable(_ message: String? = nil) -> BridgeState {
+    static func unavailable(
+        _ message: String? = nil,
+        interfaceLanguage: InterfaceLanguage = .chinese
+    ) -> BridgeState {
         BridgeState(
             serverID: nil,
             revision: 0,
@@ -119,7 +115,7 @@ struct BridgeState: Codable, Sendable {
             transcribedText: nil,
             resultCreatedAt: nil,
             lastError: message,
-            preferredKeyboardLanguage: .chinese
+            interfaceLanguage: interfaceLanguage
         )
     }
 
@@ -147,8 +143,7 @@ struct LocalBridgeClient: Sendable {
     func send(
         _ action: BridgeAction,
         requestID: String? = nil,
-        mode: TranscriptionMode? = nil,
-        language: KeyboardLanguage? = nil
+        mode: TranscriptionMode? = nil
     ) async throws -> BridgeState {
         var request = URLRequest(url: LocalBridge.commandURL)
         request.httpMethod = "POST"
@@ -159,8 +154,7 @@ struct LocalBridgeClient: Sendable {
             BridgeRequest(
                 action: action,
                 requestID: requestID,
-                mode: mode,
-                language: language
+                mode: mode
             )
         )
         return try await perform(request)
