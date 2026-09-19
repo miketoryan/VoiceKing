@@ -48,7 +48,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and can change
 
 ## Status
 
-v0.3.2 voice-only test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, automatic app wake-and-return, simplified app navigation, and a VK app icon.
+v0.3.3 voice-only test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, SwiftUI URL handoff with a personal-sideload fallback, automatic app return, simplified app navigation, and a VK app icon.
 
 ## Acknowledgements
 

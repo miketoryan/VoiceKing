@@ -1,4 +1,34 @@
+import SwiftUI
 import UIKit
+
+@MainActor
+private final class KeyboardURLLauncher: ObservableObject {
+    struct Request: Equatable {
+        let id = UUID()
+        let url: URL
+    }
+
+    @Published var request: Request?
+
+    func open(_ url: URL) {
+        request = Request(url: url)
+    }
+}
+
+private struct KeyboardURLLauncherView: View {
+    @ObservedObject var launcher: KeyboardURLLauncher
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .onChange(of: launcher.request) { _, request in
+                guard let request else { return }
+                openURL(request.url)
+                launcher.request = nil
+            }
+    }
+}
 
 final class KeyboardViewController: UIInputViewController {
     private let statusLabel = UILabel()
@@ -7,6 +37,8 @@ final class KeyboardViewController: UIInputViewController {
     private let globeButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private let bridge = LocalBridgeClient()
+    private let urlLauncher = KeyboardURLLauncher()
+    private var urlLauncherHost: UIHostingController<KeyboardURLLauncherView>?
 
     private var latestState = BridgeState.unavailable()
     private var currentRequestID: String?
@@ -94,6 +126,17 @@ final class KeyboardViewController: UIInputViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
+        let launcherHost = UIHostingController(
+            rootView: KeyboardURLLauncherView(launcher: urlLauncher)
+        )
+        addChild(launcherHost)
+        launcherHost.view.backgroundColor = .clear
+        launcherHost.view.isUserInteractionEnabled = false
+        launcherHost.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(launcherHost.view)
+        launcherHost.didMove(toParent: self)
+        urlLauncherHost = launcherHost
+
         let height = view.heightAnchor.constraint(equalToConstant: 180)
         height.priority = .init(999)
         NSLayoutConstraint.activate([
@@ -102,6 +145,10 @@ final class KeyboardViewController: UIInputViewController {
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
             micButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 54),
+            launcherHost.view.widthAnchor.constraint(equalToConstant: 1),
+            launcherHost.view.heightAnchor.constraint(equalToConstant: 1),
+            launcherHost.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            launcherHost.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             height
         ])
     }
@@ -381,15 +428,40 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        extensionContext?.open(url) { [weak self] opened in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if !opened {
-                    self.pendingAutoRecordingAfterLaunch = false
-                    self.statusLabel.text = "请先打开一次 VoiceKing"
-                    self.refreshUI()
-                }
+        // SwiftUI's openURL environment is the supported URL handoff path from
+        // a custom keyboard. UIKit's NSExtensionContext.open is not reliable
+        // for UIInputViewController on recent iOS releases.
+        urlLauncher.open(url)
+
+        // Personal-sideload fallback. If SwiftUI has already opened VoiceKing,
+        // viewWillDisappear clears keyboardVisible and this path is skipped.
+        Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(600)) }
+            catch { return }
+            guard let self,
+                  self.keyboardVisible,
+                  self.pendingAutoRecordingAfterLaunch else { return }
+
+            if !self.openURLViaResponderChain(url) {
+                self.pendingAutoRecordingAfterLaunch = false
+                self.statusLabel.text = "无法自动打开 VoiceKing，请手动启动服务"
+                self.refreshUI()
             }
         }
+    }
+
+    @discardableResult
+    private func openURLViaResponderChain(_ url: URL) -> Bool {
+        let selector = NSSelectorFromString("openURL:")
+        var responder: UIResponder? = self
+
+        while let current = responder {
+            if current.responds(to: selector) {
+                current.perform(selector, with: url)
+                return true
+            }
+            responder = current.next
+        }
+        return false
     }
 }
