@@ -50,7 +50,6 @@ final class PictureInPictureService: NSObject,
             throw PiPError.unsupported
         }
 
-        try configurePlaybackAudioSession()
         showReady()
 
         if controller == nil {
@@ -110,12 +109,6 @@ final class PictureInPictureService: NSObject,
             title: "VoiceKing",
             subtitle: "Transcribing…"
         )
-    }
-
-    private func configurePlaybackAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        try session.setActive(true)
     }
 
     private func setActive(_ active: Bool) {
