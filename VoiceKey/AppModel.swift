@@ -8,8 +8,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var accountEmail: String?
     @Published private(set) var serviceReady = false
     @Published private(set) var statusText = "Idle"
-    @Published private(set) var pictureInPictureActive = false
-    @Published private(set) var pictureInPictureSupported: Bool
     @Published var lastError: String?
     @Published var preferredKeyboardLanguage: KeyboardLanguage {
         didSet {
@@ -20,8 +18,6 @@ final class AppModel: ObservableObject {
             markStateChanged()
         }
     }
-
-    let pictureInPictureService: PictureInPictureService
 
     private let auth: ChatGPTAuthManager
     private let audio = AudioService()
@@ -54,21 +50,12 @@ final class AppModel: ObservableObject {
             rawValue: UserDefaults.standard.string(forKey: Defaults.keyboardLanguage) ?? ""
         ) ?? .chinese
 
-        let pictureInPictureService = PictureInPictureService()
-        self.pictureInPictureService = pictureInPictureService
-        self.pictureInPictureSupported = pictureInPictureService.isSupported
 
         let auth = ChatGPTAuthManager()
         self.auth = auth
         self.signedIn = auth.isSignedIn
         self.accountEmail = auth.credential?.email
 
-        pictureInPictureService.onActiveChanged = { [weak self] active in
-            self?.handlePictureInPictureStateChanged(active)
-        }
-        pictureInPictureService.onError = { [weak self] message in
-            self?.lastError = message
-        }
 
         do {
             try localBridge.start { [weak self] request in
@@ -116,41 +103,6 @@ final class AppModel: ObservableObject {
         await startService(armingMicrophoneBeforeReturn: false)
     }
 
-    func enableSkipAppSwitching() async {
-        lastError = nil
-
-        if !serviceReady {
-            await startService(armingMicrophoneBeforeReturn: false)
-            guard serviceReady else { return }
-        }
-
-        await startPictureInPictureIfPossible()
-    }
-
-    private func startPictureInPictureIfPossible() async {
-        guard pictureInPictureSupported else {
-            statusText = "当前设备不支持免跳转模式"
-            markStateChanged()
-            return
-        }
-        guard !pictureInPictureActive else { return }
-
-        do {
-            try audio.enterPictureInPictureStandby()
-            statusText = "正在启动免跳转模式…"
-            markStateChanged()
-            try await pictureInPictureService.start()
-        } catch {
-            lastError = error.localizedDescription
-            statusText = "免跳转模式启动失败，已回到普通待机"
-            try? audio.enterStandby()
-            markStateChanged()
-        }
-    }
-
-    func disableSkipAppSwitching() {
-        pictureInPictureService.stop()
-    }
 
     private func startService(armingMicrophoneBeforeReturn: Bool) async {
         lastError = nil
@@ -255,7 +207,6 @@ final class AppModel: ObservableObject {
         transcriptionTask = nil
         audioActivationTask?.cancel()
         audioActivationTask = nil
-        pictureInPictureService.stop()
 
         if let url = audio.endCapture() ?? activeRecordingURL {
             try? FileManager.default.removeItem(at: url)
@@ -375,8 +326,8 @@ final class AppModel: ObservableObject {
     }
 
     private static func isTransientAudioSessionError(_ error: Error) -> Bool {
-        // iOS can briefly reject an audio transition while moving between a
-        // host app, PiP and a keyboard extension. Retry the known transient
+        // iOS can briefly reject an audio transition while moving between the
+        // host app and keyboard extension. Retry the known transient
         // "cannot interrupt others" error and CoreAudio's unspecified 'what'
         // error seen on real-device background microphone startup.
         let code = (error as NSError).code
@@ -416,7 +367,6 @@ final class AppModel: ObservableObject {
             activeRecordingURL = try audio.beginCapture()
             bridgeStatus = .recording
             statusText = "Recording…"
-            pictureInPictureService.showRecording()
             startKeyboardMonitor()
             markStateChanged()
         } catch {
@@ -444,7 +394,6 @@ final class AppModel: ObservableObject {
         statusText = activeTranscriptionMode == .smart
             ? "Transcribing and organizing…"
             : "Transcribing…"
-        pictureInPictureService.showTranscribing()
         markStateChanged()
 
         if deactivateMicrophoneAfterCapture {
@@ -453,7 +402,6 @@ final class AppModel: ObservableObject {
             } catch {
                 publishError(error.localizedDescription, requestID: requestID)
                 try? FileManager.default.removeItem(at: url)
-                pictureInPictureService.showReady()
                 return
             }
         }
@@ -493,11 +441,9 @@ final class AppModel: ObservableObject {
                 : "Keyboard closed. Transcription is ready."
             signedIn = true
             accountEmail = credential.email
-            pictureInPictureService.showReady()
             markStateChanged()
         } catch {
             guard !Task.isCancelled else { return }
-            pictureInPictureService.showReady()
             publishError(error.localizedDescription, requestID: requestID)
             statusText = "Transcription failed"
         }
@@ -619,7 +565,7 @@ final class AppModel: ObservableObject {
             serverID: serverID,
             revision: stateRevision,
             serviceReady: serviceReady,
-            skipAppSwitchingReady: pictureInPictureActive,
+            skipAppSwitchingReady: false,
             microphoneReady: audio.isRunning,
             status: bridgeStatus,
             requestID: activeRequestID,
@@ -631,7 +577,7 @@ final class AppModel: ObservableObject {
     }
 
     private func handlePictureInPictureStateChanged(_ active: Bool) {
-        pictureInPictureActive = active
+        false = active
 
         guard serviceReady else {
             markStateChanged()
@@ -653,7 +599,7 @@ final class AppModel: ObservableObject {
     }
 
     private func prepareStandbyAudio() throws {
-        if pictureInPictureActive {
+        if false {
             try audio.enterPictureInPictureStandby()
         } else {
             try audio.enterStandby()
