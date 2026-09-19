@@ -14,6 +14,8 @@ final class PictureInPictureService: NSObject,
     var onError: (@MainActor (String) -> Void)?
 
     private var controller: AVPictureInPictureController?
+    private var frameTask: Task<Void, Never>?
+    private var frameIndex: Int64 = 0
     private(set) var isActive = false
 
     var isSupported: Bool {
@@ -51,6 +53,7 @@ final class PictureInPictureService: NSObject,
         }
 
         showReady()
+        startFramePump()
 
         if controller == nil {
             let source = AVPictureInPictureController.ContentSource(
@@ -68,7 +71,7 @@ final class PictureInPictureService: NSObject,
             throw PiPError.unavailable
         }
 
-        for _ in 0..<15 {
+        for _ in 0..<40 {
             if controller.isPictureInPicturePossible {
                 break
             }
@@ -83,10 +86,24 @@ final class PictureInPictureService: NSObject,
     }
 
     func stop() {
+        frameTask?.cancel()
+        frameTask = nil
         if controller?.isPictureInPictureActive == true {
             controller?.stopPictureInPicture()
         } else {
             setActive(false)
+        }
+    }
+
+    private func startFramePump() {
+        frameTask?.cancel()
+        frameTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                self.enqueueCurrentFrame()
+                do { try await Task.sleep(for: .milliseconds(500)) }
+                catch { return }
+            }
         }
     }
 
@@ -225,6 +242,27 @@ final class PictureInPictureService: NSObject,
 
         displayLayer.flush()
         displayLayer.enqueue(sampleBuffer)
+    }
+
+    private func enqueueCurrentFrame() {
+        // A sample-buffer PiP source must keep presenting fresh timestamps.
+        // Re-enqueueing a lightweight status frame keeps isPictureInPicturePossible
+        // true on real devices instead of leaving the layer with one stale frame.
+        frameIndex &+= 1
+        renderStatus(
+            title: bridgeTitle,
+            subtitle: bridgeSubtitle
+        )
+    }
+
+    private var bridgeTitle: String {
+        isActive ? "VoiceKing Ready" : "VoiceKing"
+    }
+
+    private var bridgeSubtitle: String {
+        isActive
+            ? "Mic turns on only after Speak"
+            : "Skip app switching standby"
     }
 
     func pictureInPictureControllerDidStartPictureInPicture(
