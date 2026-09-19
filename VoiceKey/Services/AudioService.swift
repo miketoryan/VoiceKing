@@ -82,6 +82,20 @@ final class AudioService: @unchecked Sendable {
         }
     }
 
+    func enterPictureInPictureStandby() throws {
+        stopCaptureEngine()
+        stopKeepAlive()
+
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(
+            .playback,
+            mode: .default,
+            options: [.mixWithOthers]
+        )
+        try session.setActive(true)
+        audioSessionIsActive = true
+    }
+
     func beginCapture() throws -> URL {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
 
@@ -117,14 +131,15 @@ final class AudioService: @unchecked Sendable {
     }
 
     private func prepareCaptureSession(_ session: AVAudioSession) throws {
-        if session.category != .playAndRecord || session.mode != .measurement {
+        let categoryChanged = session.category != .playAndRecord || session.mode != .measurement
+        if categoryChanged {
             try session.setCategory(
                 .playAndRecord,
                 mode: .measurement,
                 options: [.mixWithOthers, .allowBluetoothHFP]
             )
         }
-        if !audioSessionIsActive {
+        if !audioSessionIsActive || categoryChanged {
             try session.setActive(true)
             audioSessionIsActive = true
         }
