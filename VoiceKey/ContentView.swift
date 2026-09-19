@@ -68,6 +68,44 @@ private struct HomeView: View {
                         .disabled(!model.signedIn)
                     }
                 }
+
+                Section("免跳转录音") {
+                    PiPPreviewView(service: model.pictureInPictureService)
+                        .frame(height: 140)
+
+                    LabeledContent("状态") {
+                        Label(
+                            model.pictureInPictureActive ? "已开启" : "未开启",
+                            systemImage: model.pictureInPictureActive
+                                ? "mic.fill"
+                                : "mic"
+                        )
+                        .foregroundStyle(
+                            model.pictureInPictureActive ? Color.green : Color.secondary
+                        )
+                    }
+
+                    Text("参考 Typeless 的交互：开启后保留一个画中画窗口，可拖到屏幕左右边缘隐藏。之后在其他 App 的 VoiceKing 键盘里点击语音，正常情况下无需再跳回 VoiceKing。麦克风只有点击“开始说话”后才开启。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    if model.pictureInPictureActive {
+                        Button("关闭免跳转模式", role: .destructive) {
+                            model.disableSkipAppSwitching()
+                        }
+                    } else {
+                        Button("开启免跳转模式") {
+                            Task { await model.enableSkipAppSwitching() }
+                        }
+                        .disabled(!model.signedIn || !model.pictureInPictureSupported)
+                    }
+
+                    if !model.pictureInPictureSupported {
+                        Text("当前设备不支持系统画中画。")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
             }
             .navigationTitle("VoiceKing")
         }
@@ -100,7 +138,10 @@ private struct SettingsView: View {
                 }
 
                 Section("麦克风") {
-                    Text("离开输入页面或切换到其他键盘约 10 秒后，VoiceKing 会关闭麦克风。再次点击语音按钮时会自动唤醒。")
+                    Text("开启“免跳转录音”后，键盘空闲时麦克风保持关闭；只有点击“开始说话”才启用麦克风，结束录音后立即关闭。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("如果画中画没有开启或被系统关闭，VoiceKing 会退回普通待机；服务真正休眠时才使用打开 App 的兜底流程。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -122,6 +163,8 @@ private struct HelpView: View {
 
                 Section("键盘使用") {
                     Text("VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。")
+                    Text("建议先在首页开启“免跳转录音”，把 VoiceKing 的画中画拖到屏幕左右边缘隐藏。")
+                    Text("键盘显示实心麦克风时代表免跳转已就绪；空心麦克风代表可能需要唤醒 VoiceKing。")
                     Text("点击语音按钮开始录音，再点一次结束；识别完成后文字会自动插入当前输入框。")
                     Text("左侧地球按钮用于切换其他输入法，右侧删除按钮可以删除识别错误的文字。")
                 }
@@ -133,11 +176,11 @@ private struct HelpView: View {
 
                 Section("注意事项") {
                     Text("语音转录和智能整理需要连接 ChatGPT；普通文字输入请切换到苹果自带键盘。")
-                    Text("VoiceKing 使用的 ChatGPT/Codex 接口未公开，未来可能变化。自动返回输入页面是个人侧载功能，不用于 App Store 发布。")
+                    Text("VoiceKing 使用的 ChatGPT/Codex 接口未公开，未来可能变化。画中画是免跳转主路径；自动打开/返回原 App 仅作为个人侧载兜底功能。")
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.5 后台恢复测试版")
+                    LabeledContent("VoiceKing", value: "0.3.6 Typeless-PiP 测试版")
                 }
             }
             .navigationTitle("说明")
