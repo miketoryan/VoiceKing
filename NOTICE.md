@@ -18,6 +18,16 @@ Copyright (c) 2026 Anton Novoselov
 The project demonstrated a robust iOS architecture for ChatGPT OAuth, keyboard
 handoff, App Groups, and background audio.
 
+## KeyboardKit host resolver
+
+Copyright (c) 2016-2026 Kankoda Sweden AB
+
+VoiceKing links the separately distributed KeyboardKit host resolver package
+to identify the app that owns the active text field on current iOS versions.
+KeyboardKit is distributed under its own closed-source license and is free to
+start using; its commercial Pro features require a separate valid license.
+VoiceKing does not copy, modify, or redistribute KeyboardKit source code.
+
 VoiceKing is a new Swift/iOS implementation and is not affiliated with OpenAI,
 Apple, A3Boy, or VivaDicta.
 

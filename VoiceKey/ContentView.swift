@@ -4,16 +4,52 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        TabView {
-            HomeView(model: model)
-                .tabItem { Label("首页", systemImage: "house.fill") }
+        Group {
+            if model.handoffActive {
+                HandoffView()
+            } else {
+                TabView {
+                    HomeView(model: model)
+                        .tabItem { Label("首页", systemImage: "house.fill") }
 
-            SettingsView(model: model)
-                .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                    SettingsView(model: model)
+                        .tabItem { Label("设置", systemImage: "gearshape.fill") }
 
-            HelpView()
-                .tabItem { Label("说明", systemImage: "book.closed.fill") }
+                    HelpView()
+                        .tabItem { Label("说明", systemImage: "book.closed.fill") }
+                }
+            }
         }
+    }
+}
+
+private struct HandoffView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.indigo, .blue],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 88, height: 88)
+                Text("VK")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+
+            Text("VoiceKing")
+                .font(.title2.bold())
+
+            Text("正在启动语音输入…")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 
@@ -73,7 +109,7 @@ private struct HomeView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Spacer()
-                    Text("v0.3.8 · build 15")
+                    Text("v0.3.9 · build 16")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.trailing, 16)
@@ -113,9 +149,6 @@ private struct SettingsView: View {
                     Text("键盘空闲时麦克风保持关闭；点击语音后 VoiceKing 会短暂唤醒，在前台开始录音并立即返回，结束录音后关闭麦克风。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("VoiceKing 不使用画中画。需要录音时采用短暂唤醒主 App 的方式取得麦克风权限并开始录音。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("设置")
@@ -128,17 +161,16 @@ private struct HelpView: View {
         NavigationStack {
             Form {
                 Section("首次设置") {
-                    Text("1. 在首页登录 ChatGPT 并点击“启动键盘服务”。正常使用不要求先开启画中画。")
+                    Text("1. 在首页登录 ChatGPT。登录成功后会自动启动键盘服务。")
                     Text("2. 打开 iPhone 设置 → 通用 → 键盘 → 键盘 → 添加新键盘 → VoiceKing。")
                     Text("3. 打开 VoiceKing 的“允许完全访问”。")
                 }
 
                 Section("键盘使用") {
                     Text("VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。")
-                    Text("默认使用空心麦克风：点击后会短暂唤醒 VoiceKing，录音已经开始后自动返回当前输入 App。")
-                    Text("VoiceKing 当前不使用画中画；语音按钮采用短暂唤醒并自动返回的方式。")
+                    Text("点击麦克风后会短暂唤醒 VoiceKing；录音开始后自动返回当前输入 App。")
                     Text("点击语音按钮开始录音，再点一次结束；识别完成后文字会自动插入当前输入框。")
-                    Text("左侧地球按钮用于切换其他输入法，右侧删除按钮可以删除识别错误的文字。")
+                    Text("键盘顶部可切换智能/原文与中英文；底部地球按钮切换输入法，换行按钮插入换行，删除按钮可修正文字。")
                 }
 
                 Section("语音模式") {
@@ -152,7 +184,7 @@ private struct HelpView: View {
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.8 · build 15")
+                    LabeledContent("VoiceKing", value: "0.3.9 · build 16")
                 }
             }
             .navigationTitle("说明")

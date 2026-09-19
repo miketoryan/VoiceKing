@@ -27,6 +27,15 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Validate current voice-only source
+        run: |
+          if rg -n 'PictureInPicture|AVPictureInPicture|\bPiP\b' VoiceKey VoiceKeyKeyboard Shared README.md; then
+            echo "Obsolete floating-media code or documentation is still present."
+            exit 1
+          fi
+          test ! -e VoiceKeyKeyboard/PinyinEngine.swift
+          test ! -d VoiceKeyKeyboard/Resources
+
       - name: Generate Xcode project
         run: xcodegen generate
 
@@ -64,6 +73,10 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP_PLIST")" != ""
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$KEYBOARD_PLIST")" = "com.apple.keyboard-service"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$KEYBOARD_PLIST")" = "true"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "0.3.9"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "16"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$KEYBOARD_PLIST")"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$KEYBOARD_PLIST")"
 
       - name: Add ad-hoc signature skeleton
         run: |

@@ -32,10 +32,13 @@ private struct KeyboardURLLauncherView: View {
 }
 
 final class KeyboardViewController: UIInputViewController {
+    private let brandLabel = UILabel()
     private let statusLabel = UILabel()
-    private let modeControl = UISegmentedControl(items: ["智能整理", "原文模式"])
+    private let modeControl = UISegmentedControl(items: ["智能", "原文"])
+    private let languageButton = UIButton(type: .system)
     private let micButton = UIButton(type: .system)
     private let globeButton = UIButton(type: .system)
+    private let returnButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private let bridge = LocalBridgeClient()
     private let urlLauncher = KeyboardURLLauncher()
@@ -46,9 +49,11 @@ final class KeyboardViewController: UIInputViewController {
     private var keyboardVisible = false
     private var mayAutoInsert = false
     private var pendingAutoRecordingAfterLaunch = false
+    private var resolvedHostBundleIdentifier: String?
     private var heartbeatTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
     private var commandTask: Task<Void, Never>?
+    private var hostResolutionTask: Task<Void, Never>?
 
     private enum Defaults {
         static let transcriptionMode = "voiceking.transcription-mode"
@@ -63,6 +68,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         keyboardVisible = true
+        resolveHostApplicationInAdvance()
         startBridgeTasks()
     }
 
@@ -84,46 +90,81 @@ final class KeyboardViewController: UIInputViewController {
         heartbeatTask?.cancel()
         pollingTask?.cancel()
         commandTask?.cancel()
+        hostResolutionTask?.cancel()
     }
 
     private func configureUI() {
         view.backgroundColor = .secondarySystemBackground
 
-        statusLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        brandLabel.text = "VK  VoiceKing"
+        brandLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        brandLabel.textColor = .label
+
+        modeControl.selectedSegmentIndex = selectedMode == .smart ? 0 : 1
+        modeControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+        modeControl.setContentHuggingPriority(.required, for: .horizontal)
+
+        languageButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        languageButton.layer.cornerRadius = 14
+        languageButton.backgroundColor = .tertiarySystemFill
+        languageButton.setTitleColor(.label, for: .normal)
+        languageButton.addTarget(self, action: #selector(toggleLanguage), for: .touchUpInside)
+
+        statusLabel.font = .systemFont(ofSize: 13, weight: .regular)
         statusLabel.textAlignment = .center
         statusLabel.numberOfLines = 2
         statusLabel.textColor = .secondaryLabel
 
-        modeControl.selectedSegmentIndex = selectedMode == .smart ? 0 : 1
-        modeControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
-
-        micButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        micButton.layer.cornerRadius = 14
-        micButton.backgroundColor = .systemBlue
+        micButton.layer.cornerRadius = 27
+        micButton.backgroundColor = .label
         micButton.tintColor = .white
-        micButton.setTitleColor(.white, for: .normal)
         micButton.addTarget(self, action: #selector(toggleRecording), for: .touchUpInside)
 
         globeButton.setImage(UIImage(systemName: "globe"), for: .normal)
         globeButton.tintColor = .label
         globeButton.addTarget(self, action: #selector(nextKeyboard), for: .touchUpInside)
 
+        returnButton.setTitle("换行", for: .normal)
+        returnButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+        returnButton.setTitleColor(.label, for: .normal)
+        returnButton.backgroundColor = .tertiarySystemFill
+        returnButton.layer.cornerRadius = 18
+        returnButton.addTarget(self, action: #selector(insertNewline), for: .touchUpInside)
+
         deleteButton.setImage(UIImage(systemName: "delete.left"), for: .normal)
         deleteButton.tintColor = .label
         deleteButton.addTarget(self, action: #selector(deleteBackward), for: .touchUpInside)
 
-        let tools = UIStackView(arrangedSubviews: [globeButton, micButton, deleteButton])
+        let topSpacer = UIView()
+        topSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let topBar = UIStackView(arrangedSubviews: [brandLabel, topSpacer, modeControl, languageButton])
+        topBar.axis = .horizontal
+        topBar.alignment = .center
+        topBar.spacing = 8
+
+        let micLeftSpacer = UIView()
+        let micRightSpacer = UIView()
+        let micRow = UIStackView(arrangedSubviews: [micLeftSpacer, micButton, micRightSpacer])
+        micRow.axis = .horizontal
+        micRow.alignment = .center
+        micRow.distribution = .equalCentering
+
+        let tools = UIStackView(arrangedSubviews: [globeButton, returnButton, deleteButton])
         tools.axis = .horizontal
-        tools.alignment = .fill
-        tools.distribution = .fillProportionally
-        tools.spacing = 10
+        tools.alignment = .center
+        tools.distribution = .equalCentering
 
         globeButton.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        returnButton.widthAnchor.constraint(equalToConstant: 86).isActive = true
+        returnButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
         deleteButton.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        modeControl.widthAnchor.constraint(equalToConstant: 112).isActive = true
+        languageButton.widthAnchor.constraint(equalToConstant: 46).isActive = true
+        languageButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
-        let stack = UIStackView(arrangedSubviews: [modeControl, statusLabel, tools])
+        let stack = UIStackView(arrangedSubviews: [topBar, statusLabel, micRow, tools])
         stack.axis = .vertical
-        stack.spacing = 10
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
@@ -138,14 +179,15 @@ final class KeyboardViewController: UIInputViewController {
         launcherHost.didMove(toParent: self)
         urlLauncherHost = launcherHost
 
-        let height = view.heightAnchor.constraint(equalToConstant: 180)
+        let height = view.heightAnchor.constraint(equalToConstant: 226)
         height.priority = .init(999)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
-            micButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 54),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -10),
+            micButton.widthAnchor.constraint(equalToConstant: 92),
+            micButton.heightAnchor.constraint(equalToConstant: 54),
             launcherHost.view.widthAnchor.constraint(equalToConstant: 1),
             launcherHost.view.heightAnchor.constraint(equalToConstant: 1),
             launcherHost.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -159,6 +201,26 @@ final class KeyboardViewController: UIInputViewController {
             ? .verbatim
             : .smart
         UserDefaults.standard.set(mode.rawValue, forKey: Defaults.transcriptionMode)
+    }
+
+    @objc private func toggleLanguage() {
+        let language: KeyboardLanguage = latestState.preferredKeyboardLanguage == .chinese
+            ? .english
+            : .chinese
+        latestState = BridgeState(
+            serverID: latestState.serverID,
+            revision: latestState.revision &+ 1,
+            serviceReady: latestState.serviceReady,
+            microphoneReady: latestState.microphoneReady,
+            status: latestState.status,
+            requestID: latestState.requestID,
+            transcribedText: latestState.transcribedText,
+            resultCreatedAt: latestState.resultCreatedAt,
+            lastError: latestState.lastError,
+            preferredKeyboardLanguage: language
+        )
+        refreshUI()
+        sendCommand(.setKeyboardLanguage, requestID: nil, language: language)
     }
 
     @objc private func toggleRecording() {
@@ -179,11 +241,10 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        // Without PiP, do not attempt to start a fresh microphone engine from
-        // the background. That path produced CoreAudio 2003329396 on-device.
-        // The fallback first opens VoiceKing so the microphone can be armed in
-        // the foreground; when the keyboard returns, microphoneReady is true.
-        if !latestState.skipAppSwitchingReady && !latestState.microphoneReady {
+        // iOS keyboard extensions cannot record directly. If the containing
+        // app's microphone engine is not already active, briefly bring
+        // VoiceKing to the foreground, start capture, and return to the host.
+        if !latestState.microphoneReady {
             launchVoiceKingAndResumeRecording()
             return
         }
@@ -208,6 +269,10 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func deleteBackward() {
         textDocumentProxy.deleteBackward()
+    }
+
+    @objc private func insertNewline() {
+        textDocumentProxy.insertText("\n")
     }
 
     private func startBridgeTasks() {
@@ -286,7 +351,6 @@ final class KeyboardViewController: UIInputViewController {
             serverID: latestState.serverID,
             revision: latestState.revision &+ 1,
             serviceReady: true,
-            skipAppSwitchingReady: latestState.skipAppSwitchingReady,
             microphoneReady: latestState.microphoneReady,
             status: .starting,
             requestID: requestID,
@@ -320,8 +384,7 @@ final class KeyboardViewController: UIInputViewController {
                 return
             }
 
-            if state.status == .idle,
-               state.skipAppSwitchingReady || state.microphoneReady {
+            if state.status == .idle, state.microphoneReady {
                 pendingAutoRecordingAfterLaunch = false
                 startRecordingRequest(requestID: currentRequestID)
                 return
@@ -339,6 +402,11 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func refreshUI() {
+        languageButton.setTitle(
+            latestState.preferredKeyboardLanguage == .chinese ? "中" : "EN",
+            for: .normal
+        )
+
         guard hasFullAccess else {
             statusLabel.text = "需要允许完全访问"
             applyMicStyle(title: "开启完全访问", symbol: "mic.slash", color: .systemGray)
@@ -355,8 +423,8 @@ final class KeyboardViewController: UIInputViewController {
         }
 
         guard latestState.serviceReady else {
-            statusLabel.text = latestState.lastError ?? "服务休眠，点语音按钮会短暂打开 VoiceKing"
-            applyMicStyle(title: "唤醒并开始说话", symbol: "mic", color: .systemGray)
+            statusLabel.text = latestState.lastError ?? "点击说话 · 自动唤醒 VoiceKing"
+            applyMicStyle(title: "唤醒并开始说话", symbol: "mic.fill", color: .label)
             return
         }
 
@@ -366,22 +434,16 @@ final class KeyboardViewController: UIInputViewController {
 
         switch latestState.status {
         case .idle:
-            if latestState.skipAppSwitchingReady {
-                statusLabel.text = "\(languageName) · 免跳转就绪"
-                applyMicStyle(title: "开始说话", symbol: "mic.fill", color: .systemBlue)
-            } else if latestState.microphoneReady {
-                statusLabel.text = "\(languageName) · 已唤醒，可直接录音"
-                applyMicStyle(title: "开始说话", symbol: "mic", color: .systemBlue)
-            } else {
-                statusLabel.text = "\(languageName) · 需要唤醒 VoiceKing"
-                applyMicStyle(title: "唤醒并开始说话", symbol: "mic", color: .systemGray)
-            }
+            statusLabel.text = latestState.microphoneReady
+                ? "\(languageName) · 点击说话"
+                : "\(languageName) · 点击说话（自动唤醒）"
+            applyMicStyle(title: "开始说话", symbol: "mic.fill", color: .label)
         case .starting:
             statusLabel.text = "正在打开麦克风…"
             applyMicStyle(title: "正在启动…", symbol: "mic", color: .systemGray)
         case .recording:
-            statusLabel.text = "录音中，再点一次结束"
-            applyMicStyle(title: "结束录音", symbol: "stop.fill", color: .systemRed)
+            statusLabel.text = "录音中 · 再点一次结束"
+            applyMicStyle(title: "结束录音", symbol: "waveform", color: .label)
         case .transcribing:
             statusLabel.text = "ChatGPT 正在识别…"
             applyMicStyle(title: "正在处理…", symbol: "waveform", color: .systemGray)
@@ -389,8 +451,8 @@ final class KeyboardViewController: UIInputViewController {
             statusLabel.text = "识别结果已过期"
             applyMicStyle(
                 title: "开始说话",
-                symbol: latestState.skipAppSwitchingReady ? "mic.fill" : "mic",
-                color: .systemBlue
+                symbol: "mic.fill",
+                color: .label
             )
         case .error:
             statusLabel.text = latestState.lastError ?? "识别失败"
@@ -399,9 +461,11 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func applyMicStyle(title: String, symbol: String, color: UIColor) {
-        micButton.setTitle("  \(title)  ", for: .normal)
+        micButton.setTitle(nil, for: .normal)
         micButton.setImage(UIImage(systemName: symbol), for: .normal)
         micButton.backgroundColor = color
+        micButton.tintColor = color == .label ? .systemBackground : .white
+        micButton.accessibilityLabel = title
     }
 
     private func insertLatestTranscription(automatically: Bool = true) {
@@ -433,7 +497,6 @@ final class KeyboardViewController: UIInputViewController {
             serverID: latestState.serverID,
             revision: latestState.revision &+ 1,
             serviceReady: latestState.serviceReady,
-            skipAppSwitchingReady: latestState.skipAppSwitchingReady,
             microphoneReady: latestState.microphoneReady,
             status: .idle,
             requestID: nil,
@@ -452,6 +515,17 @@ final class KeyboardViewController: UIInputViewController {
         return mode
     }
 
+    private func resolveHostApplicationInAdvance() {
+        guard resolvedHostBundleIdentifier == nil else { return }
+        hostResolutionTask?.cancel()
+        hostResolutionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let bundleIdentifier = await self.resolveHostBundleIdentifier()
+            guard !Task.isCancelled else { return }
+            self.resolvedHostBundleIdentifier = bundleIdentifier
+        }
+    }
+
     private func launchVoiceKingAndResumeRecording() {
         guard !pendingAutoRecordingAfterLaunch else { return }
 
@@ -462,9 +536,18 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.text = "正在启动 VoiceKing…"
         applyMicStyle(title: "正在打开 App…", symbol: "mic", color: .systemGray)
 
+        if let resolvedHostBundleIdentifier {
+            openVoiceKing(
+                returningTo: resolvedHostBundleIdentifier,
+                requestID: requestID
+            )
+            return
+        }
+
         Task { @MainActor [weak self] in
             guard let self else { return }
             let hostBundleIdentifier = await self.resolveHostBundleIdentifier()
+            self.resolvedHostBundleIdentifier = hostBundleIdentifier
             self.openVoiceKing(
                 returningTo: hostBundleIdentifier,
                 requestID: requestID

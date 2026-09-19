@@ -82,23 +82,6 @@ final class AudioService: @unchecked Sendable {
         }
     }
 
-    func enterPictureInPictureStandby() throws {
-        stopCaptureEngine()
-        stopKeepAlive()
-
-        // Keep a record-capable session active while PiP keeps VoiceKing alive.
-        // The input engine is stopped here, so iOS does not show the microphone
-        // privacy indicator until the user actually taps Speak.
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .measurement,
-            options: [.mixWithOthers, .allowBluetoothHFP]
-        )
-        try session.setActive(true)
-        audioSessionIsActive = true
-    }
-
     func beginCapture() throws -> URL {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
 

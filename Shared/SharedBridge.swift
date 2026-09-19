@@ -2,7 +2,7 @@ import Foundation
 
 enum LocalBridge {
     static let port = 14_557
-    static let protocolVersion = "5"
+    static let protocolVersion = "6"
     static let keyboardHeartbeatInterval: Duration = .seconds(2)
     static let keyboardExitGracePeriod: TimeInterval = 10
     static let resultValidity: TimeInterval = 300
@@ -76,7 +76,6 @@ struct BridgeState: Codable, Sendable {
     let serverID: String?
     let revision: UInt64
     let serviceReady: Bool
-    let skipAppSwitchingReady: Bool
     let microphoneReady: Bool
     let status: BridgeStatus
     let requestID: String?
@@ -89,7 +88,6 @@ struct BridgeState: Codable, Sendable {
         serverID: String?,
         revision: UInt64,
         serviceReady: Bool,
-        skipAppSwitchingReady: Bool = false,
         microphoneReady: Bool = false,
         status: BridgeStatus,
         requestID: String?,
@@ -101,7 +99,6 @@ struct BridgeState: Codable, Sendable {
         self.serverID = serverID
         self.revision = revision
         self.serviceReady = serviceReady
-        self.skipAppSwitchingReady = skipAppSwitchingReady
         self.microphoneReady = microphoneReady
         self.status = status
         self.requestID = requestID
@@ -116,7 +113,6 @@ struct BridgeState: Codable, Sendable {
             serverID: nil,
             revision: 0,
             serviceReady: false,
-            skipAppSwitchingReady: false,
             microphoneReady: false,
             status: .idle,
             requestID: nil,

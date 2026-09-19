@@ -1,69 +1,68 @@
 # VoiceKing
 
-VoiceKing is an experimental, personal-use iPhone voice keyboard. It records through the containing app, transcribes speech with ChatGPT/Codex, optionally cleans up the transcript, and inserts the result into the active text field.
+VoiceKing is a personal-use iPhone voice keyboard. It briefly wakes its containing app to start microphone capture, returns to the original text field, transcribes with ChatGPT, and inserts the result through the keyboard extension.
 
-## v0.3.6: Typeless-style no-switch path
+## Current interaction
 
-The primary interaction now follows the behavior publicly documented by Typeless for iOS:
+The v0.3.9 test flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
-- **Skip app switching uses Picture in Picture.** Start it from the VoiceKing Home tab, then tuck the PiP window against the left or right edge of the screen.
-- **Solid microphone = no-switch path ready.** The keyboard can ask VoiceKing to record without first opening the app.
-- **Outline microphone = fallback path.** VoiceKing may need to briefly open the containing app if the service has been suspended.
-- **The microphone stays off while idle.** Keyboard heartbeat/state polling no longer arms the microphone. Input starts only after the user taps Speak and stops immediately after Stop.
-- The previous app-open / host-app-return code remains only as a personal-sideload fallback. It is no longer the primary architecture.
+1. Open a text field and switch to the VoiceKing keyboard.
+2. Tap the central microphone.
+3. VoiceKing briefly appears with a simple launch screen, starts capture in the foreground, and automatically returns to the original app.
+4. Speak while the keyboard shows the recording state.
+5. Tap the microphone again to finish. The keyboard shows processing and inserts the result when it is ready.
 
-This is inspired by Typeless's documented user-facing behavior; it is not a claim about Typeless's private implementation.
+There is no floating overlay or video-based background mode. The wake-and-return route is the only fresh-recording path. If the microphone is still active during the 10-second exit grace period, recording can start immediately without another wake.
+
+## Keyboard design
+
+- Compact VoiceKing header
+- Smart Cleanup / Verbatim mode switch
+- Chinese / English recognition switch
+- Large central voice button with idle, recording, and processing states
+- Globe, newline, and delete controls
+- Voice-only design; no QWERTY or Pinyin keyboard is bundled
 
 ## Modes
 
-- **Smart Cleanup (default)** — adds punctuation and paragraphs, removes meaningless filler and repetition, and fixes obvious grammar or word-order problems. It must preserve the speaker's meaning, names, numbers, amounts, dates, and technical terms; it must not add information or summarize substantive content.
-- **Verbatim** — returns the transcription without a second-pass rewrite. Use it for quotations, interviews, and meeting records where the original wording matters.
+- **Smart Cleanup (default)** adds punctuation and paragraphs, removes meaningless filler and repetition, and fixes obvious grammar or word-order problems. It must preserve meaning, names, numbers, amounts, dates, units, model numbers, and technical terms. It must not add information or summarize substantive content.
+- **Verbatim** returns the transcription without a second-pass rewrite. It is intended for quotations, interviews, and meeting records.
 
-The mode is selected at the top of the VoiceKing keyboard and persists between uses. Smart Cleanup first calls the transcription endpoint, then sends the raw transcript through `https://chatgpt.com/backend-api/codex/responses` with a strict cleanup instruction. If cleanup is unavailable, VoiceKing returns the valid raw transcription rather than losing it.
+Smart Cleanup first calls the transcription endpoint, then sends the raw transcript through `https://chatgpt.com/backend-api/codex/responses` with strict cleanup instructions. If cleanup fails, VoiceKing returns the valid raw transcript instead of losing it.
 
 ## Architecture
 
-- **VoiceKing app** — ChatGPT OAuth, recognition-language setting, microphone permission, Picture in Picture service, transcription, and smart cleanup.
-- **VoiceKingKeyboard extension** — mode selector, microphone/start/stop UI, service status, app wake fallback, result insertion, globe key, and delete key. It intentionally does not include a QWERTY or Pinyin keyboard.
-- **Picture in Picture** — keeps the containing app reachable while another app is in front. The PiP status view can be tucked off-screen.
-- **Localhost bridge** — the keyboard talks to the app through `127.0.0.1:14557`, avoiding the App Group entitlement unavailable to free Apple developer accounts.
+- **VoiceKing app** handles ChatGPT OAuth, microphone permission, recording, transcription, and smart cleanup.
+- **VoiceKingKeyboard extension** handles mode/language controls, app wake, service status, result insertion, newline, delete, and keyboard switching.
+- **Localhost bridge** connects the keyboard and containing app through `127.0.0.1:14557`, avoiding the App Group entitlement unavailable to free Apple developer accounts.
+- **KeyboardKit host resolver** identifies the app that owns the active text field on current iOS releases so VoiceKing can return after foreground capture starts.
 
 The containing app records on behalf of the keyboard because iOS keyboard extensions cannot access the microphone directly. Recordings have no fixed duration limit and are uploaded through a temporary multipart file instead of being copied fully into memory.
 
-## Usage
+## Microphone lifecycle
 
-1. Open VoiceKing and sign in with ChatGPT.
-2. Tap **Start Keyboard Service**.
-3. Tap **Enable Skip App Switching / 开启免跳转模式** and leave the Picture in Picture window active. It may be tucked against the screen edge.
-4. In Settings → General → Keyboard → Keyboards, add VoiceKing and enable **Allow Full Access**.
-5. Open a text field in another app and switch to VoiceKing.
-6. A **solid microphone** means the PiP no-switch path is ready. Tap Speak and begin dictating immediately.
-7. Tap Stop. VoiceKing closes the microphone before transcription/cleanup continues, then inserts the result.
-8. If the keyboard shows an outline microphone because VoiceKing is unavailable, tapping it uses the older wake/open-app fallback.
+- The microphone starts only after the user taps the VoiceKing voice button.
+- Leaving the input interface starts a 10-second grace period.
+- If the keyboard does not return during that period, capture stops. An active recording is finished and transcribed; an idle microphone is closed.
+- The background service keeps only a silent audio session alive so the localhost bridge remains reachable. Fresh capture still uses the foreground wake-and-return route.
 
-## Build
+## Build and sideload
 
-The repository's `Build` GitHub Actions workflow selects Xcode 26.3, validates a simulator build, archives an unsigned iPhone build, and uploads `VoiceKing-unsigned.ipa`.
+The `Build` GitHub Actions workflow selects Xcode 26.3, validates a simulator build, archives an unsigned iPhone build, and uploads `VoiceKing-unsigned.ipa`.
 
 1. Push a commit to `main` or a `codex/**` test branch.
-2. Open the completed workflow run and download the `VoiceKing-unsigned` artifact.
-3. Extract the ZIP to get `VoiceKing-unsigned.ipa`.
-4. Sideload the IPA with the same free Apple ID whenever refreshing VoiceKing. A free signature lasts 7 days.
+2. Download the `VoiceKing-unsigned` artifact from the completed workflow.
+3. Sideload the IPA with Sideloadly using the same free Apple ID as previous VoiceKing builds.
+4. A free Apple signature normally needs refreshing every 7 days.
 
 ## Limitations
 
-The ChatGPT/Codex endpoints used by this project are undocumented and can change without notice. PiP/background lifecycle behavior must be validated on a real iPhone. The automatic host-app return fallback uses unsupported behavior and is intended only for personal sideloading, not App Store distribution.
+The ChatGPT/Codex endpoints used by this project are undocumented and may change. Generic automatic return to another iOS app also has no supported public API, so the personal-sideload return helper must be verified on each iOS release. If automatic return is rejected, VoiceKing keeps recording and shows a clear message so the user can return manually.
 
 ## Status
 
-v0.3.6 Typeless-PiP test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, PiP-based Skip App Switching, mic-off-until-Speak behavior, solid/outline mic status, and the existing wake/open-app fallback.
+v0.3.9 current Typeless-style test: one-tap wake, foreground microphone start, automatic host return, simplified voice keyboard, matching app/extension versions, and all obsolete floating-media experiments removed.
 
 ## Acknowledgements
 
-The design was informed by:
-
-- Typeless's public iOS interaction documentation
-- `A3Boy/codex-voice-input`
-- `n0an/VivaDicta`
-
-See `NOTICE.md` and `LICENSE`.
+The design was informed by Typeless's public iOS behavior and the MIT-licensed `A3Boy/codex-voice-input` and `n0an/VivaDicta` projects. See `NOTICE.md` and `LICENSE`.

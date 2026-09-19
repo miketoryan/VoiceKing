@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var accountEmail: String?
     @Published private(set) var serviceReady = false
     @Published private(set) var statusText = "Idle"
+    @Published private(set) var handoffActive = false
     @Published var lastError: String?
     @Published var preferredKeyboardLanguage: KeyboardLanguage {
         didSet {
@@ -83,6 +84,7 @@ final class AppModel: ObservableObject {
             try await auth.signIn()
             signedIn = true
             accountEmail = auth.credential?.email
+            await startService()
         } catch {
             lastError = error.localizedDescription
         }
@@ -96,10 +98,9 @@ final class AppModel: ObservableObject {
     }
 
     func startService() async {
-        // Normal startup mirrors the observed Typeless flow: keep the bridge
-        // alive, but do not require or automatically show Picture in Picture.
-        // When the keyboard needs the microphone it performs a very short
-        // foreground wake, starts capture there, and immediately returns.
+        // Keep the local bridge available with the microphone off. When the
+        // keyboard needs audio, VoiceKing briefly wakes in the foreground,
+        // starts capture, and immediately returns to the previous app.
         await startService(armingMicrophoneBeforeReturn: false)
     }
 
@@ -154,6 +155,7 @@ final class AppModel: ObservableObject {
               url.host?.lowercased() == "start-recording" else {
             return
         }
+        handoffActive = true
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let queryItems = components?.queryItems ?? []
@@ -176,7 +178,10 @@ final class AppModel: ObservableObject {
         // app switch but delivered only silence, followed by CoreAudio
         // 2003329396 on retry.
         await startService(armingMicrophoneBeforeReturn: true)
-        guard serviceReady else { return }
+        guard serviceReady else {
+            handoffActive = false
+            return
+        }
 
         if let requestID, !requestID.isEmpty {
             startRecordingFromKeyboard(
@@ -188,12 +193,17 @@ final class AppModel: ObservableObject {
 
         // Return as soon as capture is confirmed. A long artificial delay makes
         // the app flash much more visibly than Typeless.
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(120))
         if let returnBundleIdentifier,
            openHostApplication(bundleIdentifier: returnBundleIdentifier) {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                self?.handoffActive = false
+            }
             return
         }
 
+        handoffActive = false
         statusText = returnBundleIdentifier == nil
             ? "未识别原输入 App，请手动返回"
             : "系统未允许自动返回，请手动返回"
@@ -214,6 +224,7 @@ final class AppModel: ObservableObject {
         activeRecordingURL = nil
         activeRequestID = nil
         audio.disarm()
+        handoffActive = false
         serviceReady = false
         statusText = "Idle"
         bridgeStatus = .idle
@@ -565,7 +576,6 @@ final class AppModel: ObservableObject {
             serverID: serverID,
             revision: stateRevision,
             serviceReady: serviceReady,
-            skipAppSwitchingReady: false,
             microphoneReady: audio.isRunning,
             status: bridgeStatus,
             requestID: activeRequestID,
@@ -598,12 +608,61 @@ final class AppModel: ObservableObject {
             return false
         }
 
-        let openSelector = NSSelectorFromString("openApplicationWithBundleID:")
-        guard workspace.responds(to: openSelector) else { return false }
+        let legacySelector = NSSelectorFromString("openApplicationWithBundleID:")
+        if workspace.responds(to: legacySelector) {
+            typealias LegacyOpenApplication = @convention(c) (
+                AnyObject,
+                Selector,
+                NSString
+            ) -> Bool
+            let implementation = workspace.method(for: legacySelector)
+            let openApplication = unsafeBitCast(
+                implementation,
+                to: LegacyOpenApplication.self
+            )
+            if openApplication(workspace, legacySelector, bundleIdentifier as NSString) {
+                return true
+            }
+        }
 
-        typealias OpenApplication = @convention(c) (AnyObject, Selector, NSString) -> Bool
-        let implementation = workspace.method(for: openSelector)
-        let openApplication = unsafeBitCast(implementation, to: OpenApplication.self)
-        return openApplication(workspace, openSelector, bundleIdentifier as NSString)
+        // iOS 26 also exposes a newer LaunchServices selector. It is used as a
+        // personal-sideload fallback when the legacy call refuses the launch.
+        let modernSelector = NSSelectorFromString(
+            "openApplicationWithBundleIdentifier:configuration:completionHandler:"
+        )
+        guard workspace.responds(to: modernSelector) else { return false }
+
+        typealias Completion = @convention(block) (Bool, NSError?) -> Void
+        typealias ModernOpenApplication = @convention(c) (
+            AnyObject,
+            Selector,
+            NSString,
+            AnyObject?,
+            Completion
+        ) -> Void
+
+        let completion: Completion = { [weak self] success, error in
+            guard !success else { return }
+            Task { @MainActor in
+                self?.handoffActive = false
+                self?.statusText = "系统未允许自动返回，请手动返回"
+                self?.lastError = error?.localizedDescription
+                self?.markStateChanged()
+            }
+        }
+
+        let implementation = workspace.method(for: modernSelector)
+        let openApplication = unsafeBitCast(
+            implementation,
+            to: ModernOpenApplication.self
+        )
+        openApplication(
+            workspace,
+            modernSelector,
+            bundleIdentifier as NSString,
+            nil,
+            completion
+        )
+        return true
     }
 }
