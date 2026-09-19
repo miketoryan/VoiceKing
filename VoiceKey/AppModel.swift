@@ -201,20 +201,38 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let returnBundleIdentifier = URLComponents(
-            url: url,
-            resolvingAgainstBaseURL: false
-        )?.queryItems?.first(where: {
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let queryItems = components?.queryItems ?? []
+        let returnBundleIdentifier = queryItems.first(where: {
             $0.name == "returnBundleIdentifier"
         })?.value
+        let requestID = queryItems.first(where: {
+            $0.name == "requestID"
+        })?.value
+        let mode = queryItems.first(where: {
+            $0.name == "mode"
+        })?.value.flatMap(TranscriptionMode.init(rawValue:)) ?? .smart
+        let language = queryItems.first(where: {
+            $0.name == "language"
+        })?.value.flatMap(KeyboardLanguage.init(rawValue:)) ?? preferredKeyboardLanguage
 
-        // Prepare the microphone while VoiceKing is in the foreground. Waiting
-        // until the keyboard reappears creates an AVAudioSession race during
-        // the app-to-keyboard transition (OSStatus !int / 560557684).
+        // Fallback path: start the *actual recording file* while VoiceKing is
+        // in the foreground, then return to the host app. This avoids the real-
+        // device failure where AVAudioEngine reported "recording" after the
+        // app switch but delivered only silence, followed by CoreAudio
+        // 2003329396 on retry.
         await startService(armingMicrophoneBeforeReturn: true)
         guard serviceReady else { return }
 
-        try? await Task.sleep(for: .milliseconds(500))
+        if let requestID, !requestID.isEmpty {
+            startRecordingFromKeyboard(
+                requestID: requestID,
+                mode: mode,
+                language: language
+            )
+        }
+
+        try? await Task.sleep(for: .milliseconds(350))
         if let returnBundleIdentifier,
            openHostApplication(bundleIdentifier: returnBundleIdentifier) {
             return
@@ -395,6 +413,7 @@ final class AppModel: ObservableObject {
             bridgeStatus = .recording
             statusText = "Recording…"
             pictureInPictureService.showRecording()
+            startKeyboardMonitor()
             markStateChanged()
         } catch {
             publishError(error.localizedDescription, requestID: requestID)
