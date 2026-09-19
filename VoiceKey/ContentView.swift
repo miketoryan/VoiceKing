@@ -82,7 +82,7 @@ private struct HomeView: View {
                         )
                     }
 
-                    Text("参考 Typeless 的交互：开启后保留一个画中画窗口，可拖到屏幕左右边缘隐藏。之后在其他 App 的 VoiceKing 键盘里点击语音，正常情况下无需再跳回 VoiceKing。麦克风只有点击“开始说话”后才开启。")
+                    Text("Typeless 的实际规则是两条路径：实心麦克风＝免跳转已就绪；空心麦克风＝点击后会短暂打开主 App，再自动返回。若使用画中画免跳转，系统会先出现一个小窗，需要手动拖到屏幕左/右边缘隐藏；隐藏后平时看不到画中画。麦克风空闲时保持关闭。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
@@ -111,7 +111,7 @@ private struct HomeView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Spacer()
-                    Text("v0.3.6.3 · build 12")
+                    Text("v0.3.6.4 · build 13")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.trailing, 16)
@@ -173,8 +173,8 @@ private struct HelpView: View {
 
                 Section("键盘使用") {
                     Text("VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。")
-                    Text("建议先在首页开启“免跳转录音”，把 VoiceKing 的画中画拖到屏幕左右边缘隐藏。")
-                    Text("键盘显示实心麦克风时代表免跳转已就绪；空心麦克风代表可能需要唤醒 VoiceKing。")
+                    Text("若希望完全不切 App：先在首页开启免跳转模式；系统出现 VoiceKing 小窗后，把它拖到屏幕左/右边缘藏起来。以后小窗可以一直藏在边缘，不需要保持可见。")
+                    Text("键盘显示实心麦克风：直接录音，不切 App。显示空心麦克风：会像 Typeless 一样短暂打开 VoiceKing，取得麦克风后自动返回，再开始录音。")
                     Text("点击语音按钮开始录音，再点一次结束；识别完成后文字会自动插入当前输入框。")
                     Text("左侧地球按钮用于切换其他输入法，右侧删除按钮可以删除识别错误的文字。")
                 }
@@ -190,7 +190,7 @@ private struct HelpView: View {
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.6.3 · build 12")
+                    LabeledContent("VoiceKing", value: "0.3.6.4 · build 13")
                 }
             }
             .navigationTitle("说明")
