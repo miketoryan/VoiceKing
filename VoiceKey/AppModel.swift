@@ -576,6 +576,10 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private func prepareStandbyAudio() throws {
+        try audio.enterStandby()
+    }
+
     private func markStateChanged() {
         stateRevision &+= 1
     }
