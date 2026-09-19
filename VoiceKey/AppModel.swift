@@ -166,7 +166,9 @@ final class AppModel: ObservableObject {
             return
         }
 
-        statusText = "Microphone ready — return to the previous app"
+        statusText = returnBundleIdentifier == nil
+            ? "未识别原输入 App，请手动返回"
+            : "系统未允许自动返回，请手动返回"
         markStateChanged()
     }
 

@@ -12,6 +12,11 @@ settings:
     DEVELOPMENT_TEAM: ""
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
+packages:
+  KeyboardKit:
+    url: https://github.com/KeyboardKit/KeyboardKit.git
+    revision: 2515c422efcd96cd5c9a78a1c8da736eb9640dc4
+
 targets:
   VoiceKing:
     type: application
@@ -48,6 +53,9 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
+    dependencies:
+      - package: KeyboardKit
+        product: KeyboardKitHostPlugin
 
 schemes:
   VoiceKing:

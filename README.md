@@ -48,7 +48,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and can change
 
 ## Status
 
-v0.3.4 wake-flow test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, foreground microphone preparation with transient audio-session retries, host-app detection and automatic return for personal sideloading, simplified app navigation, and a VK app icon.
+v0.3.5 background-resume test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, a record-capable standby audio session, iOS 26 host-app resolution and automatic return for personal sideloading, simplified app navigation, and a VK app icon.
 
 ## Acknowledgements
 

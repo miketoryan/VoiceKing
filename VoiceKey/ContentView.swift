@@ -137,7 +137,7 @@ private struct HelpView: View {
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.4 自动唤醒测试版")
+                    LabeledContent("VoiceKing", value: "0.3.5 后台恢复测试版")
                 }
             }
             .navigationTitle("说明")

@@ -8,6 +8,7 @@ final class AudioService: @unchecked Sendable {
     private var outputFile: AVAudioFile?
     private var currentURL: URL?
     private var tapInstalled = false
+    private var audioSessionIsActive = false
 
     private(set) var isArmed = false
 
@@ -33,12 +34,7 @@ final class AudioService: @unchecked Sendable {
         stopKeepAlive()
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .measurement,
-            options: [.mixWithOthers, .allowBluetoothHFP]
-        )
-        try session.setActive(true)
+        try prepareCaptureSession(session)
 
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -54,7 +50,12 @@ final class AudioService: @unchecked Sendable {
         }
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            audioSessionIsActive = false
+            throw error
+        }
         isArmed = true
     }
 
@@ -62,12 +63,11 @@ final class AudioService: @unchecked Sendable {
         stopCaptureEngine()
 
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playback,
-            mode: .default,
-            options: [.mixWithOthers]
-        )
-        try session.setActive(true)
+        // Keep the already-authorized play-and-record session active while
+        // only playing silence. The input engine is stopped, so the privacy
+        // indicator turns off, but the app can resume input from the keyboard
+        // without changing audio categories in the background.
+        try prepareCaptureSession(session)
 
         if keepAlivePlayer == nil {
             let player = try AVAudioPlayer(data: Self.silentWAVData)
@@ -113,6 +113,21 @@ final class AudioService: @unchecked Sendable {
         stopCaptureEngine()
         stopKeepAlive()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        audioSessionIsActive = false
+    }
+
+    private func prepareCaptureSession(_ session: AVAudioSession) throws {
+        if session.category != .playAndRecord || session.mode != .measurement {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.mixWithOthers, .allowBluetoothHFP]
+            )
+        }
+        if !audioSessionIsActive {
+            try session.setActive(true)
+            audioSessionIsActive = true
+        }
     }
 
     private func stopCaptureEngine() {
