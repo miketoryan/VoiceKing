@@ -179,6 +179,15 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
+        // Without PiP, do not attempt to start a fresh microphone engine from
+        // the background. That path produced CoreAudio 2003329396 on-device.
+        // The fallback first opens VoiceKing so the microphone can be armed in
+        // the foreground; when the keyboard returns, microphoneReady is true.
+        if !latestState.skipAppSwitchingReady && !latestState.microphoneReady {
+            launchVoiceKingAndResumeRecording()
+            return
+        }
+
         switch latestState.status {
         case .recording:
             mayAutoInsert = true
@@ -278,6 +287,7 @@ final class KeyboardViewController: UIInputViewController {
             revision: latestState.revision &+ 1,
             serviceReady: true,
             skipAppSwitchingReady: latestState.skipAppSwitchingReady,
+            microphoneReady: latestState.microphoneReady,
             status: .starting,
             requestID: requestID,
             transcribedText: nil,
@@ -302,7 +312,8 @@ final class KeyboardViewController: UIInputViewController {
 
         if pendingAutoRecordingAfterLaunch,
            state.serviceReady,
-           state.status == .idle {
+           state.status == .idle,
+           state.skipAppSwitchingReady || state.microphoneReady {
             pendingAutoRecordingAfterLaunch = false
             startRecordingRequest()
             return
@@ -349,9 +360,12 @@ final class KeyboardViewController: UIInputViewController {
             if latestState.skipAppSwitchingReady {
                 statusLabel.text = "\(languageName) · 免跳转就绪"
                 applyMicStyle(title: "开始说话", symbol: "mic.fill", color: .systemBlue)
-            } else {
-                statusLabel.text = "\(languageName) · 普通模式"
+            } else if latestState.microphoneReady {
+                statusLabel.text = "\(languageName) · 已唤醒，可直接录音"
                 applyMicStyle(title: "开始说话", symbol: "mic", color: .systemBlue)
+            } else {
+                statusLabel.text = "\(languageName) · 需要唤醒 VoiceKing"
+                applyMicStyle(title: "唤醒并开始说话", symbol: "mic", color: .systemGray)
             }
         case .starting:
             statusLabel.text = "正在打开麦克风…"
@@ -411,6 +425,7 @@ final class KeyboardViewController: UIInputViewController {
             revision: latestState.revision &+ 1,
             serviceReady: latestState.serviceReady,
             skipAppSwitchingReady: latestState.skipAppSwitchingReady,
+            microphoneReady: latestState.microphoneReady,
             status: .idle,
             requestID: nil,
             transcribedText: nil,
