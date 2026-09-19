@@ -80,14 +80,14 @@ private struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("键盘语言") {
-                    Picker("默认语言", selection: $model.preferredKeyboardLanguage) {
+                Section("语音识别语言") {
+                    Picker("识别语言", selection: $model.preferredKeyboardLanguage) {
                         Text("中文").tag(KeyboardLanguage.chinese)
                         Text("English").tag(KeyboardLanguage.english)
                     }
                     .pickerStyle(.segmented)
 
-                    Text("键盘上的“中/英”键可以随时切换。这里设置下次打开键盘时的默认语言，同时决定语音识别使用中文还是英文。")
+                    Text("这里决定下一次语音输入使用中文识别还是英文识别。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -95,14 +95,6 @@ private struct SettingsView: View {
                 Section("语音模式") {
                     LabeledContent("默认模式", value: "智能整理")
                     Text("也可以直接在键盘顶部切换为“原文模式”。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("词库") {
-                    LabeledContent("中文词库", value: "自动更新")
-                    LabeledContent("英文词库", value: "iOS 本地词典")
-                    Text("有网络并允许完全访问时，键盘每 7 天检查一次中文扩展词库；更新失败不会影响本地输入。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -129,9 +121,9 @@ private struct HelpView: View {
                 }
 
                 Section("键盘使用") {
-                    Text("中文模式：输入拼音，从候选栏选择文字；空格会选择第一个候选。")
-                    Text("English 模式：使用 QWERTY 键盘直接输入，可使用 Shift、删除、空格和回车。")
-                    Text("识别结果插入后，可以直接用同一个键盘删除并修改，不必切换输入法。")
+                    Text("VoiceKing 是纯语音键盘，不提供拼音或英文按键输入。")
+                    Text("点击语音按钮开始录音，再点一次结束；识别完成后文字会自动插入当前输入框。")
+                    Text("左侧地球按钮用于切换其他输入法，右侧删除按钮可以删除识别错误的文字。")
                 }
 
                 Section("语音模式") {
@@ -140,12 +132,12 @@ private struct HelpView: View {
                 }
 
                 Section("注意事项") {
-                    Text("中文拼音候选在本机生成；联网时 VoiceKing 可以更新扩展词库。语音转录和智能整理需要连接 ChatGPT。")
+                    Text("语音转录和智能整理需要连接 ChatGPT；普通文字输入请切换到苹果自带键盘。")
                     Text("VoiceKing 使用的 ChatGPT/Codex 接口未公开，未来可能变化。自动返回输入页面是个人侧载功能，不用于 App Store 发布。")
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3 测试版")
+                    LabeledContent("VoiceKing", value: "0.3.2 纯语音测试版")
                 }
             }
             .navigationTitle("说明")

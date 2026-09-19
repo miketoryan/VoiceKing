@@ -1,26 +1,18 @@
 # VoiceKing
 
-VoiceKing is an experimental, personal-use iPhone voice and text keyboard. It provides a QWERTY keyboard with Chinese Pinyin candidates and English completion, records through the containing app, transcribes with ChatGPT/Codex, optionally cleans up the transcript, and inserts the result into the active text field.
-
-## Text keyboard
-
-- **Chinese** — type continuous Pinyin, tap a candidate, or press space to choose the first candidate. The bundled dictionary works offline.
-- **English** — QWERTY input with Shift and completions from the iOS spelling and supplementary lexicons.
-- **Editing** — delete, punctuation, space, and return stay available after a voice result is inserted, so correction does not require switching keyboards.
-- **Language sync** — the in-keyboard 中/EN key switches immediately. The containing app's Settings tab controls the default language and the speech-recognition language.
-- **Dictionary updates** — with Full Access and a network connection, the keyboard checks the official Apache-2.0 Rime Pinyin dictionary for an update every seven days. Failed updates silently fall back to the bundled data. Frequently selected Chinese candidates receive a local ranking boost.
+VoiceKing is an experimental, personal-use iPhone voice keyboard. It records through the containing app, transcribes speech with ChatGPT/Codex, optionally cleans up the transcript, and inserts the result into the active text field.
 
 ## Modes
 
 - **Smart Cleanup (default)** — adds punctuation and paragraphs, removes meaningless filler and repetition, and fixes obvious grammar or word-order problems. It must preserve the speaker's meaning, names, numbers, amounts, dates, and technical terms; it must not add information or summarize substantive content.
 - **Verbatim** — returns the transcription without a second-pass rewrite. Use it for quotations, interviews, and meeting records where the original wording matters.
 
-The selected mode is stored by the keyboard. Smart Cleanup first calls the transcription endpoint, then sends the raw transcript through `https://chatgpt.com/backend-api/codex/responses` with a strict cleanup instruction. If cleanup is unavailable, VoiceKing returns the valid raw transcription rather than losing it.
+The mode is selected at the top of the VoiceKing keyboard and persists between uses. Smart Cleanup first calls the transcription endpoint, then sends the raw transcript through `https://chatgpt.com/backend-api/codex/responses` with a strict cleanup instruction. If cleanup is unavailable, VoiceKing returns the valid raw transcription rather than losing it.
 
 ## Architecture
 
-- **VoiceKing app** — ChatGPT OAuth, microphone permission, background audio session, transcription, and smart cleanup.
-- **VoiceKingKeyboard extension** — Chinese/English QWERTY input, local candidate ranking, mode selector, microphone/start/stop UI, app wake-up, and text insertion.
+- **VoiceKing app** — ChatGPT OAuth, recognition-language setting, microphone permission, background audio session, transcription, and smart cleanup.
+- **VoiceKingKeyboard extension** — mode selector, microphone/start/stop UI, app wake-up, result insertion, globe key, and delete key. It intentionally does not include a QWERTY or Pinyin keyboard.
 - **Localhost bridge** — the keyboard talks to the app through `127.0.0.1:14557`, avoiding the App Group entitlement unavailable to free Apple developer accounts.
 
 The containing app records on behalf of the keyboard because iOS keyboard extensions cannot access the microphone directly. Recordings have no fixed duration limit and are uploaded through a temporary multipart file instead of being copied fully into memory.
@@ -34,8 +26,7 @@ The repository's `Build` GitHub Actions workflow selects Xcode 26.3, validates a
 1. Push a commit to `main` or a `codex/**` test branch.
 2. Open the completed workflow run and download the `VoiceKing-unsigned` artifact.
 3. Extract the ZIP to get `VoiceKing-unsigned.ipa`.
-4. In AltServer on the Mac, hold Option while opening its menu and choose **Sideload .ipa…**.
-5. Sign with the same free Apple ID whenever refreshing VoiceKing. A free signature lasts 7 days.
+4. Sideload the IPA with the same free Apple ID whenever refreshing VoiceKing. A free signature lasts 7 days.
 
 For a local build, install Xcode 26+ and XcodeGen, run `xcodegen generate`, and select a signing team for both targets. VoiceKing intentionally has no App Group entitlement.
 
@@ -44,11 +35,12 @@ For a local build, install Xcode 26+ and XcodeGen, run `xcodegen generate`, and 
 1. Open VoiceKing, sign in with ChatGPT, and tap **Start Keyboard Service** once.
 2. In Settings → General → Keyboard → Keyboards, add VoiceKing and enable **Allow Full Access**.
 3. Switch to VoiceKing from the globe key in any text field.
-4. Use **中/EN** for Chinese Pinyin or English typing. Settings in the app controls the default.
-5. Choose **智能整理** or **原文模式**. 智能整理 is selected by default.
-6. Tap the microphone to start; tap again to finish and insert the result.
-7. Correct the result directly with the QWERTY keyboard.
-8. After leaving the keyboard, the microphone closes in about 10 seconds. If the service is sleeping next time, tapping the microphone performs the wake-and-return flow automatically.
+4. Choose **智能整理** or **原文模式**. 智能整理 is selected by default.
+5. Tap the microphone to start; tap again to finish and insert the result.
+6. Use the delete key for a quick correction, or switch to another keyboard for normal typing.
+7. After leaving the keyboard, the microphone closes in about 10 seconds. If the service is sleeping next time, tapping the microphone performs the wake-and-return flow automatically.
+
+The speech-recognition language is selected in the app's Settings tab.
 
 ## Limitations
 
@@ -56,7 +48,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and can change
 
 ## Status
 
-v0.3 test — Chinese/English QWERTY input, online-updatable offline Pinyin data, local candidate learning, simplified app navigation, synchronized language settings, and a VK app icon.
+v0.3.2 voice-only test — Smart Cleanup and Verbatim modes, Chinese/English speech recognition, automatic app wake-and-return, simplified app navigation, and a VK app icon.
 
 ## Acknowledgements
 

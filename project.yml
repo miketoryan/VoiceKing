@@ -38,8 +38,7 @@ targets:
       - path: VoiceKeyKeyboard
         excludes:
           - Resources
-      - path: VoiceKeyKeyboard/Resources
-        buildPhase: resources
+          - PinyinEngine.swift
       - path: Shared
     settings:
       base:

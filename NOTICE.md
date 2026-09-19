@@ -21,13 +21,6 @@ handoff, App Groups, and background audio.
 VoiceKing is a new Swift/iOS implementation and is not affiliated with OpenAI,
 Apple, A3Boy, or VivaDicta.
 
-## Rime pinyin-simp
-
-The bundled Pinyin dictionary is derived from `rime/rime-pinyin-simp`, itself
-derived from the Android Open Source Project Pinyin IME dictionary. It is used
-under the Apache License 2.0. The original `AUTHORS` and `LICENSE` files are in
-`ThirdParty/RimePinyin/`.
-
 The VK app icon artwork was generated specifically for VoiceKing and then
 resized and packaged as an iOS asset catalog.
 
