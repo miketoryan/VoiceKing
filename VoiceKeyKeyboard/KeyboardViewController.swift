@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Darwin
 
 @MainActor
 private final class KeyboardURLLauncher: ObservableObject {
@@ -421,9 +422,27 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.text = "正在启动 VoiceKing…"
         applyMicStyle(title: "正在打开 App…", color: .systemGray)
 
-        guard let url = URL(
-            string: "voiceking://start-recording?mode=\(selectedMode.rawValue)"
-        ) else {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let hostBundleIdentifier = await self.resolveHostBundleIdentifier()
+            self.openVoiceKing(returningTo: hostBundleIdentifier)
+        }
+    }
+
+    private func openVoiceKing(returningTo hostBundleIdentifier: String?) {
+        var components = URLComponents()
+        components.scheme = "voiceking"
+        components.host = "start-recording"
+        components.queryItems = [
+            URLQueryItem(name: "mode", value: selectedMode.rawValue)
+        ]
+        if let hostBundleIdentifier {
+            components.queryItems?.append(
+                URLQueryItem(name: "returnBundleIdentifier", value: hostBundleIdentifier)
+            )
+        }
+
+        guard let url = components.url else {
             pendingAutoRecordingAfterLaunch = false
             return
         }
@@ -448,6 +467,78 @@ final class KeyboardViewController: UIInputViewController {
                 self.refreshUI()
             }
         }
+    }
+
+    private func resolveHostBundleIdentifier() async -> String? {
+        // iOS 26.4+ can expose the host XPC connection a little late. Resolve
+        // it while the keyboard is still visible and retry for a short window.
+        for attempt in 0..<10 {
+            if let identifier = resolveHostBundleIdentifierOnce(),
+               !identifier.isEmpty,
+               identifier != "<null>" {
+                return identifier
+            }
+            guard attempt < 9 else { break }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+        return nil
+    }
+
+    private func resolveHostBundleIdentifierOnce() -> String? {
+        if let parent,
+           parent.responds(to: NSSelectorFromString("_hostBundleID")),
+           let identifier = parent.value(forKey: "_hostBundleID") as? String,
+           identifier != "<null>" {
+            return identifier
+        }
+
+        guard let parent,
+              parent.responds(to: NSSelectorFromString("_hostPID")),
+              let hostPID = parent.value(forKey: "_hostPID") else {
+            return nil
+        }
+
+        let defaultService = NSSelectorFromString("defaultService")
+        guard let serviceClass = NSClassFromString("PKService") as? NSObject.Type,
+              serviceClass.responds(to: defaultService),
+              let serviceValue = serviceClass.perform(defaultService),
+              let service = serviceValue.takeUnretainedValue() as? NSObject else {
+            return nil
+        }
+
+        let personalitiesSelector = NSSelectorFromString("personalities")
+        guard service.responds(to: personalitiesSelector),
+              let personalitiesValue = service.perform(personalitiesSelector),
+              let personalities = personalitiesValue.takeUnretainedValue() as? NSDictionary,
+              let extensionIdentifier = Bundle.main.bundleIdentifier,
+              let extensionInfo = personalities[extensionIdentifier] as? NSDictionary,
+              let hostInfo = extensionInfo.object(forKey: hostPID) as? NSObject else {
+            return nil
+        }
+
+        let connectionSelector = NSSelectorFromString("connection")
+        guard hostInfo.responds(to: connectionSelector),
+              let connectionValue = hostInfo.perform(connectionSelector),
+              let connection = connectionValue.takeUnretainedValue() as? NSObject else {
+            return nil
+        }
+
+        let xpcConnectionSelector = NSSelectorFromString("_xpcConnection")
+        guard connection.responds(to: xpcConnectionSelector),
+              let xpcValue = connection.perform(xpcConnectionSelector) else {
+            return nil
+        }
+        let xpcConnection = xpcValue.takeUnretainedValue()
+
+        guard let handle = dlopen("/usr/lib/libc.dylib", RTLD_NOW) else { return nil }
+        defer { dlclose(handle) }
+        guard let symbol = dlsym(handle, "xpc_connection_copy_bundle_id") else { return nil }
+
+        typealias CopyBundleID = @convention(c) (AnyObject) -> UnsafeMutablePointer<CChar>?
+        let copyBundleID = unsafeBitCast(symbol, to: CopyBundleID.self)
+        guard let response = copyBundleID(xpcConnection) else { return nil }
+        defer { free(response) }
+        return String(cString: response)
     }
 
     @discardableResult

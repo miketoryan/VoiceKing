@@ -39,6 +39,7 @@ final class AppModel: ObservableObject {
     private var keyboardHasConnected = false
     private var keyboardMonitorTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
+    private var audioActivationTask: Task<Bool, Never>?
 
     private enum Defaults {
         static let keyboardLanguage = "voiceking.keyboard-language"
@@ -69,6 +70,7 @@ final class AppModel: ObservableObject {
     deinit {
         keyboardMonitorTask?.cancel()
         transcriptionTask?.cancel()
+        audioActivationTask?.cancel()
         localBridge.stop()
     }
 
@@ -91,6 +93,10 @@ final class AppModel: ObservableObject {
     }
 
     func startService() async {
+        await startService(armingMicrophoneBeforeReturn: false)
+    }
+
+    private func startService(armingMicrophoneBeforeReturn: Bool) async {
         lastError = nil
         guard signedIn else {
             lastError = "Sign in with ChatGPT first."
@@ -108,13 +114,24 @@ final class AppModel: ObservableObject {
             transcriptionTask = nil
             keyboardMonitorTask?.cancel()
             keyboardMonitorTask = nil
+            audioActivationTask?.cancel()
+            audioActivationTask = nil
 
-            try audio.enterStandby()
+            try await performAudioOperationWithRetry {
+                if armingMicrophoneBeforeReturn {
+                    try audio.arm()
+                } else {
+                    try audio.enterStandby()
+                }
+            }
             serviceReady = true
-            statusText = "Waiting for VoiceKing keyboard"
+            statusText = armingMicrophoneBeforeReturn
+                ? "Ready for keyboard dictation"
+                : "Waiting for VoiceKing keyboard"
             activeRecordingURL = nil
             activeRequestID = nil
             bridgeStatus = .idle
+            bridgeError = nil
             clearResult()
             lastKeyboardHeartbeat = nil
             keyboardHasConnected = false
@@ -130,11 +147,27 @@ final class AppModel: ObservableObject {
             return
         }
 
-        await startService()
+        let returnBundleIdentifier = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: false
+        )?.queryItems?.first(where: {
+            $0.name == "returnBundleIdentifier"
+        })?.value
+
+        // Prepare the microphone while VoiceKing is in the foreground. Waiting
+        // until the keyboard reappears creates an AVAudioSession race during
+        // the app-to-keyboard transition (OSStatus !int / 560557684).
+        await startService(armingMicrophoneBeforeReturn: true)
         guard serviceReady else { return }
 
-        try? await Task.sleep(for: .milliseconds(350))
-        returnToPreviousApp()
+        try? await Task.sleep(for: .milliseconds(500))
+        if let returnBundleIdentifier,
+           openHostApplication(bundleIdentifier: returnBundleIdentifier) {
+            return
+        }
+
+        statusText = "Microphone ready — return to the previous app"
+        markStateChanged()
     }
 
     func stopService() {
@@ -142,6 +175,8 @@ final class AppModel: ObservableObject {
         keyboardMonitorTask = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        audioActivationTask?.cancel()
+        audioActivationTask = nil
 
         if let url = audio.endCapture() ?? activeRecordingURL {
             try? FileManager.default.removeItem(at: url)
@@ -164,22 +199,24 @@ final class AppModel: ObservableObject {
             break
 
         case .heartbeat:
-            activateMicrophoneForKeyboardIfNeeded()
+            _ = await activateMicrophoneForKeyboardIfNeeded()
 
         case .startRecording:
-            activateMicrophoneForKeyboardIfNeeded()
-            startRecordingFromKeyboard(
-                requestID: request.requestID,
-                mode: request.mode ?? .smart,
-                language: request.language ?? preferredKeyboardLanguage
-            )
+            if await activateMicrophoneForKeyboardIfNeeded() {
+                startRecordingFromKeyboard(
+                    requestID: request.requestID,
+                    mode: request.mode ?? .smart,
+                    language: request.language ?? preferredKeyboardLanguage
+                )
+            }
 
         case .stopRecording:
-            activateMicrophoneForKeyboardIfNeeded()
-            beginFinishingRecording(
-                expectedRequestID: request.requestID,
-                deactivateMicrophoneAfterCapture: false
-            )
+            if await activateMicrophoneForKeyboardIfNeeded() {
+                beginFinishingRecording(
+                    expectedRequestID: request.requestID,
+                    deactivateMicrophoneAfterCapture: false
+                )
+            }
 
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
@@ -193,24 +230,73 @@ final class AppModel: ObservableObject {
         return currentBridgeState()
     }
 
-    private func activateMicrophoneForKeyboardIfNeeded() {
-        guard serviceReady else { return }
+    private func activateMicrophoneForKeyboardIfNeeded() async -> Bool {
+        guard serviceReady else { return false }
 
         lastKeyboardHeartbeat = Date()
         keyboardHasConnected = true
 
-        guard !audio.isRunning else { return }
-
-        do {
-            try audio.arm()
-            statusText = "Ready for keyboard dictation"
-            lastError = nil
-            bridgeError = nil
-            markStateChanged()
+        if audio.isRunning {
             startKeyboardMonitor()
-        } catch {
-            publishError(error.localizedDescription)
+            return true
         }
+
+        if let audioActivationTask {
+            return await audioActivationTask.value
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            do {
+                try await self.performAudioOperationWithRetry {
+                    try self.audio.arm()
+                }
+                guard self.serviceReady else {
+                    self.audio.disarm()
+                    return false
+                }
+                self.statusText = "Ready for keyboard dictation"
+                self.lastError = nil
+                self.bridgeError = nil
+                self.markStateChanged()
+                self.startKeyboardMonitor()
+                return true
+            } catch {
+                guard !Task.isCancelled else { return false }
+                self.publishError(error.localizedDescription)
+                return false
+            }
+        }
+        audioActivationTask = task
+        let activated = await task.value
+        audioActivationTask = nil
+        return activated
+    }
+
+    private func performAudioOperationWithRetry(
+        _ operation: () throws -> Void
+    ) async throws {
+        var retry = 0
+        while true {
+            do {
+                try operation()
+                return
+            } catch {
+                guard Self.isTransientAudioSessionError(error), retry < 4 else {
+                    throw error
+                }
+                retry += 1
+                statusText = "Waiting for the microphone…"
+                try await Task.sleep(for: .milliseconds(150 * retry))
+            }
+        }
+    }
+
+    private static func isTransientAudioSessionError(_ error: Error) -> Bool {
+        // AVAudioSession.ErrorCode.cannotInterruptOthers is the four-character
+        // OSStatus "!int". It commonly occurs for a brief moment while iOS is
+        // moving from the host app to a custom keyboard.
+        (error as NSError).code == 560_557_684
     }
 
     private func startRecordingFromKeyboard(
@@ -450,9 +536,26 @@ final class AppModel: ObservableObject {
         stateRevision &+= 1
     }
 
-    private func returnToPreviousApp() {
-        let selector = NSSelectorFromString("suspend")
-        guard UIApplication.shared.responds(to: selector) else { return }
-        UIApplication.shared.perform(selector)
+    private func openHostApplication(bundleIdentifier: String) -> Bool {
+        guard !bundleIdentifier.isEmpty,
+              bundleIdentifier != Bundle.main.bundleIdentifier,
+              let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type else {
+            return false
+        }
+
+        let defaultWorkspaceSelector = NSSelectorFromString("defaultWorkspace")
+        guard workspaceClass.responds(to: defaultWorkspaceSelector),
+              let workspaceValue = workspaceClass.perform(defaultWorkspaceSelector),
+              let workspace = workspaceValue.takeUnretainedValue() as? NSObject else {
+            return false
+        }
+
+        let openSelector = NSSelectorFromString("openApplicationWithBundleID:")
+        guard workspace.responds(to: openSelector) else { return false }
+
+        typealias OpenApplication = @convention(c) (AnyObject, Selector, NSString) -> Bool
+        let implementation = workspace.method(for: openSelector)
+        let openApplication = unsafeBitCast(implementation, to: OpenApplication.self)
+        return openApplication(workspace, openSelector, bundleIdentifier as NSString)
     }
 }

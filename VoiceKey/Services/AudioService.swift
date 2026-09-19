@@ -28,7 +28,7 @@ final class AudioService: @unchecked Sendable {
     }
 
     func arm() throws {
-        guard !isArmed else { return }
+        guard !isRunning else { return }
 
         stopKeepAlive()
 
@@ -134,6 +134,7 @@ final class AudioService: @unchecked Sendable {
 
     private func stopKeepAlive() {
         keepAlivePlayer?.stop()
+        keepAlivePlayer?.currentTime = 0
     }
 
     private func consume(_ buffer: AVAudioPCMBuffer) {
