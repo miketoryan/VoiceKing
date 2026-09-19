@@ -576,36 +576,6 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func handlePictureInPictureStateChanged(_ active: Bool) {
-        false = active
-
-        guard serviceReady else {
-            markStateChanged()
-            return
-        }
-
-        if bridgeStatus != .recording && bridgeStatus != .starting {
-            do {
-                try prepareStandbyAudio()
-            } catch {
-                lastError = error.localizedDescription
-            }
-        }
-
-        statusText = active
-            ? "免跳转模式已就绪"
-            : "普通待机：必要时会短暂打开 VoiceKing"
-        markStateChanged()
-    }
-
-    private func prepareStandbyAudio() throws {
-        if false {
-            try audio.enterPictureInPictureStandby()
-        } else {
-            try audio.enterStandby()
-        }
-    }
-
     private func markStateChanged() {
         stateRevision &+= 1
     }
