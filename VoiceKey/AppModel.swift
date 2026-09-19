@@ -8,6 +8,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var accountEmail: String?
     @Published private(set) var serviceReady = false
     @Published private(set) var statusText = "Idle"
+    @Published private(set) var pictureInPictureActive = false
+    @Published private(set) var pictureInPictureSupported: Bool
     @Published var lastError: String?
     @Published var preferredKeyboardLanguage: KeyboardLanguage {
         didSet {
@@ -18,6 +20,8 @@ final class AppModel: ObservableObject {
             markStateChanged()
         }
     }
+
+    let pictureInPictureService: PictureInPictureService
 
     private let auth: ChatGPTAuthManager
     private let audio = AudioService()
@@ -49,10 +53,22 @@ final class AppModel: ObservableObject {
         preferredKeyboardLanguage = KeyboardLanguage(
             rawValue: UserDefaults.standard.string(forKey: Defaults.keyboardLanguage) ?? ""
         ) ?? .chinese
+
+        let pictureInPictureService = PictureInPictureService()
+        self.pictureInPictureService = pictureInPictureService
+        self.pictureInPictureSupported = pictureInPictureService.isSupported
+
         let auth = ChatGPTAuthManager()
         self.auth = auth
         self.signedIn = auth.isSignedIn
         self.accountEmail = auth.credential?.email
+
+        pictureInPictureService.onActiveChanged = { [weak self] active in
+            self?.handlePictureInPictureStateChanged(active)
+        }
+        pictureInPictureService.onError = { [weak self] message in
+            self?.lastError = message
+        }
 
         do {
             try localBridge.start { [weak self] request in
@@ -96,6 +112,31 @@ final class AppModel: ObservableObject {
         await startService(armingMicrophoneBeforeReturn: false)
     }
 
+    func enableSkipAppSwitching() async {
+        lastError = nil
+
+        if !serviceReady {
+            await startService()
+            guard serviceReady else { return }
+        }
+
+        do {
+            try audio.enterPictureInPictureStandby()
+            statusText = "正在启动免跳转模式…"
+            markStateChanged()
+            try await pictureInPictureService.start()
+        } catch {
+            lastError = error.localizedDescription
+            statusText = "免跳转模式启动失败，已回到普通待机"
+            try? audio.enterStandby()
+            markStateChanged()
+        }
+    }
+
+    func disableSkipAppSwitching() {
+        pictureInPictureService.stop()
+    }
+
     private func startService(armingMicrophoneBeforeReturn: Bool) async {
         lastError = nil
         guard signedIn else {
@@ -121,7 +162,7 @@ final class AppModel: ObservableObject {
                 if armingMicrophoneBeforeReturn {
                     try audio.arm()
                 } else {
-                    try audio.enterStandby()
+                    try prepareStandbyAudio()
                 }
             }
             serviceReady = true
@@ -179,6 +220,7 @@ final class AppModel: ObservableObject {
         transcriptionTask = nil
         audioActivationTask?.cancel()
         audioActivationTask = nil
+        pictureInPictureService.stop()
 
         if let url = audio.endCapture() ?? activeRecordingURL {
             try? FileManager.default.removeItem(at: url)
@@ -201,10 +243,11 @@ final class AppModel: ObservableObject {
             break
 
         case .heartbeat:
-            _ = await activateMicrophoneForKeyboardIfNeeded()
+            noteKeyboardHeartbeat()
 
         case .startRecording:
-            if await activateMicrophoneForKeyboardIfNeeded() {
+            noteKeyboardHeartbeat()
+            if await activateMicrophoneForRecording() {
                 startRecordingFromKeyboard(
                     requestID: request.requestID,
                     mode: request.mode ?? .smart,
@@ -213,12 +256,11 @@ final class AppModel: ObservableObject {
             }
 
         case .stopRecording:
-            if await activateMicrophoneForKeyboardIfNeeded() {
-                beginFinishingRecording(
-                    expectedRequestID: request.requestID,
-                    deactivateMicrophoneAfterCapture: false
-                )
-            }
+            noteKeyboardHeartbeat()
+            beginFinishingRecording(
+                expectedRequestID: request.requestID,
+                deactivateMicrophoneAfterCapture: true
+            )
 
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
@@ -232,11 +274,14 @@ final class AppModel: ObservableObject {
         return currentBridgeState()
     }
 
-    private func activateMicrophoneForKeyboardIfNeeded() async -> Bool {
-        guard serviceReady else { return false }
-
+    private func noteKeyboardHeartbeat() {
+        guard serviceReady else { return }
         lastKeyboardHeartbeat = Date()
         keyboardHasConnected = true
+    }
+
+    private func activateMicrophoneForRecording() async -> Bool {
+        guard serviceReady else { return false }
 
         if audio.isRunning {
             startKeyboardMonitor()
@@ -334,6 +379,7 @@ final class AppModel: ObservableObject {
             activeRecordingURL = try audio.beginCapture()
             bridgeStatus = .recording
             statusText = "Recording…"
+            pictureInPictureService.showRecording()
             markStateChanged()
         } catch {
             publishError(error.localizedDescription, requestID: requestID)
@@ -360,10 +406,18 @@ final class AppModel: ObservableObject {
         statusText = activeTranscriptionMode == .smart
             ? "Transcribing and organizing…"
             : "Transcribing…"
+        pictureInPictureService.showTranscribing()
         markStateChanged()
 
         if deactivateMicrophoneAfterCapture {
-            deactivateMicrophonePreservingResponse()
+            do {
+                try prepareStandbyAudio()
+            } catch {
+                publishError(error.localizedDescription, requestID: requestID)
+                try? FileManager.default.removeItem(at: url)
+                pictureInPictureService.showReady()
+                return
+            }
         }
 
         defer {
@@ -401,9 +455,11 @@ final class AppModel: ObservableObject {
                 : "Keyboard closed. Transcription is ready."
             signedIn = true
             accountEmail = credential.email
+            pictureInPictureService.showReady()
             markStateChanged()
         } catch {
             guard !Task.isCancelled else { return }
+            pictureInPictureService.showReady()
             publishError(error.localizedDescription, requestID: requestID)
             statusText = "Transcription failed"
         }
@@ -458,7 +514,7 @@ final class AppModel: ObservableObject {
         keyboardMonitorTask?.cancel()
         keyboardMonitorTask = nil
         do {
-            try audio.enterStandby()
+            try prepareStandbyAudio()
         } catch {
             publishError(error.localizedDescription)
             stopService()
@@ -524,7 +580,8 @@ final class AppModel: ObservableObject {
         BridgeState(
             serverID: serverID,
             revision: stateRevision,
-            serviceReady: serviceReady && audio.isRunning,
+            serviceReady: serviceReady,
+            skipAppSwitchingReady: pictureInPictureActive,
             status: bridgeStatus,
             requestID: activeRequestID,
             transcribedText: responseText,
@@ -532,6 +589,36 @@ final class AppModel: ObservableObject {
             lastError: bridgeError,
             preferredKeyboardLanguage: preferredKeyboardLanguage
         )
+    }
+
+    private func handlePictureInPictureStateChanged(_ active: Bool) {
+        pictureInPictureActive = active
+
+        guard serviceReady else {
+            markStateChanged()
+            return
+        }
+
+        if bridgeStatus != .recording && bridgeStatus != .starting {
+            do {
+                try prepareStandbyAudio()
+            } catch {
+                lastError = error.localizedDescription
+            }
+        }
+
+        statusText = active
+            ? "免跳转模式已就绪"
+            : "普通待机：必要时会短暂打开 VoiceKing"
+        markStateChanged()
+    }
+
+    private func prepareStandbyAudio() throws {
+        if pictureInPictureActive {
+            try audio.enterPictureInPictureStandby()
+        } else {
+            try audio.enterStandby()
+        }
     }
 
     private func markStateChanged() {
