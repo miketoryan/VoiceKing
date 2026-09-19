@@ -278,8 +278,8 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func startRecordingRequest() {
-        let requestID = UUID().uuidString
+    private func startRecordingRequest(requestID suppliedRequestID: String? = nil) {
+        let requestID = suppliedRequestID ?? UUID().uuidString
         currentRequestID = requestID
         mayAutoInsert = true
         latestState = BridgeState(
@@ -311,12 +311,21 @@ final class KeyboardViewController: UIInputViewController {
         refreshUI()
 
         if pendingAutoRecordingAfterLaunch,
-           state.serviceReady,
-           state.status == .idle,
-           state.skipAppSwitchingReady || state.microphoneReady {
-            pendingAutoRecordingAfterLaunch = false
-            startRecordingRequest()
-            return
+           state.serviceReady {
+            if state.status == .recording,
+               let requestID = state.requestID,
+               requestID == currentRequestID {
+                pendingAutoRecordingAfterLaunch = false
+                mayAutoInsert = true
+                return
+            }
+
+            if state.status == .idle,
+               state.skipAppSwitchingReady || state.microphoneReady {
+                pendingAutoRecordingAfterLaunch = false
+                startRecordingRequest(requestID: currentRequestID)
+                return
+            }
         }
 
         if state.status == .completed { insertLatestTranscription() }
@@ -445,6 +454,10 @@ final class KeyboardViewController: UIInputViewController {
 
     private func launchVoiceKingAndResumeRecording() {
         guard !pendingAutoRecordingAfterLaunch else { return }
+
+        let requestID = UUID().uuidString
+        currentRequestID = requestID
+        mayAutoInsert = true
         pendingAutoRecordingAfterLaunch = true
         statusLabel.text = "正在启动 VoiceKing…"
         applyMicStyle(title: "正在打开 App…", symbol: "mic", color: .systemGray)
@@ -452,16 +465,27 @@ final class KeyboardViewController: UIInputViewController {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let hostBundleIdentifier = await self.resolveHostBundleIdentifier()
-            self.openVoiceKing(returningTo: hostBundleIdentifier)
+            self.openVoiceKing(
+                returningTo: hostBundleIdentifier,
+                requestID: requestID
+            )
         }
     }
 
-    private func openVoiceKing(returningTo hostBundleIdentifier: String?) {
+    private func openVoiceKing(
+        returningTo hostBundleIdentifier: String?,
+        requestID: String
+    ) {
         var components = URLComponents()
         components.scheme = "voiceking"
         components.host = "start-recording"
         components.queryItems = [
-            URLQueryItem(name: "mode", value: selectedMode.rawValue)
+            URLQueryItem(name: "requestID", value: requestID),
+            URLQueryItem(name: "mode", value: selectedMode.rawValue),
+            URLQueryItem(
+                name: "language",
+                value: latestState.preferredKeyboardLanguage.rawValue
+            )
         ]
         if let hostBundleIdentifier {
             components.queryItems?.append(
