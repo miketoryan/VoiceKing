@@ -51,6 +51,7 @@ final class KeyboardViewController: UIInputViewController {
     private var currentRequestID: String?
     private var keyboardVisible = false
     private var mayAutoInsert = false
+    private var insertionScheduledForRequestID: String?
     private var pendingAutoRecordingAfterLaunch = false
     private var pendingBackgroundStartRequestID: String?
     private var resolvedHostBundleIdentifier: String?
@@ -82,6 +83,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillDisappear(_ animated: Bool) {
         keyboardVisible = false
         mayAutoInsert = false
+        insertionScheduledForRequestID = nil
         stopBridgeTasks()
         super.viewWillDisappear(animated)
     }
@@ -212,7 +214,7 @@ final class KeyboardViewController: UIInputViewController {
         if latestState.status == .completed,
            let requestID = latestState.requestID,
            latestState.isFreshResponse(for: requestID) {
-            insertLatestTranscription()
+            insertLatestTranscription(automatically: false)
             return
         }
 
@@ -240,6 +242,7 @@ final class KeyboardViewController: UIInputViewController {
     @objc private func nextKeyboard() {
         keyboardVisible = false
         mayAutoInsert = false
+        insertionScheduledForRequestID = nil
         stopBridgeTasks()
         advanceToNextInputMode()
     }
@@ -337,6 +340,7 @@ final class KeyboardViewController: UIInputViewController {
         let requestID = suppliedRequestID ?? UUID().uuidString
         currentRequestID = requestID
         mayAutoInsert = true
+        insertionScheduledForRequestID = nil
         pendingBackgroundStartRequestID = allowForegroundFallback ? requestID : nil
         latestState = BridgeState(
             serverID: latestState.serverID,
@@ -372,11 +376,27 @@ final class KeyboardViewController: UIInputViewController {
     private func apply(_ state: BridgeState) {
         if state.serverID == latestState.serverID,
            state.revision < latestState.revision { return }
+
         latestState = state
         UserDefaults.standard.set(
             state.interfaceLanguage.rawValue,
             forKey: Defaults.interfaceLanguage
         )
+
+        // Cold-start handoff can cause the keyboard extension to disappear and
+        // be recreated. Re-adopt the active request from the app's bridge so
+        // the returned keyboard still owns the transcription and may insert it.
+        if let requestID = state.requestID,
+           state.status == .starting
+            || state.status == .recording
+            || state.status == .transcribing
+            || state.status == .completed {
+            if currentRequestID == nil {
+                currentRequestID = requestID
+            }
+            mayAutoInsert = true
+        }
+
         refreshUI()
 
         if let backgroundRequestID = pendingBackgroundStartRequestID,
@@ -412,7 +432,20 @@ final class KeyboardViewController: UIInputViewController {
             }
         }
 
-        if state.status == .completed { insertLatestTranscription() }
+        if state.status == .completed,
+           let requestID = state.requestID,
+           insertionScheduledForRequestID != requestID {
+            insertionScheduledForRequestID = requestID
+
+            // Let the original host text field regain focus after the app
+            // handoff before issuing the one physical insertText call.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+                guard let self else { return }
+                guard self.insertionScheduledForRequestID == requestID else { return }
+                self.insertionScheduledForRequestID = nil
+                self.insertLatestTranscription()
+            }
+        }
     }
 
     private func applyConnectionFailure() {
@@ -557,18 +590,22 @@ final class KeyboardViewController: UIInputViewController {
         micButton.accessibilityLabel = title
     }
 
-    private func insertLatestTranscription() {
+    private func insertLatestTranscription(automatically: Bool = true) {
+        guard viewIfLoaded?.window != nil else { return }
+
         guard let requestID = latestState.requestID,
               latestState.isFreshResponse(for: requestID) else {
             refreshUI()
             return
         }
 
-        guard keyboardVisible,
-              mayAutoInsert,
-              currentRequestID == requestID else {
-            refreshUI()
-            return
+        if automatically {
+            guard keyboardVisible,
+                  mayAutoInsert,
+                  currentRequestID == requestID else {
+                refreshUI()
+                return
+            }
         }
 
         guard let text = latestState.transcribedText,
@@ -577,23 +614,65 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
+        let beforeContextCount =
+            textDocumentProxy.documentContextBeforeInput?.utf16.count
+        let beforeHasText = textDocumentProxy.hasText
+
+        // Exactly one physical insertion call for this completed request.
         textDocumentProxy.insertText(text)
-        currentRequestID = nil
-        mayAutoInsert = false
-        latestState = BridgeState(
-            serverID: latestState.serverID,
-            revision: latestState.revision &+ 1,
-            serviceReady: latestState.serviceReady,
-            microphoneReady: latestState.microphoneReady,
-            status: .idle,
-            requestID: nil,
-            transcribedText: nil,
-            resultCreatedAt: nil,
-            lastError: nil,
-            interfaceLanguage: latestState.interfaceLanguage
-        )
-        refreshUI()
-        sendCommand(.acknowledgeResult, requestID: requestID)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            let afterContextCount =
+                self.textDocumentProxy.documentContextBeforeInput?.utf16.count
+            let afterHasText = self.textDocumentProxy.hasText
+
+            let changedCount: Bool
+            if let beforeContextCount, let afterContextCount {
+                changedCount = beforeContextCount != afterContextCount
+            } else {
+                changedCount = true
+            }
+
+            let likelySucceeded =
+                (!beforeHasText && afterHasText)
+                || changedCount
+                || beforeContextCount == nil
+                || afterContextCount == nil
+
+            if likelySucceeded {
+                self.currentRequestID = nil
+                self.mayAutoInsert = false
+                self.insertionScheduledForRequestID = nil
+
+                self.latestState = BridgeState(
+                    serverID: self.latestState.serverID,
+                    revision: self.latestState.revision &+ 1,
+                    serviceReady: self.latestState.serviceReady,
+                    microphoneReady: self.latestState.microphoneReady,
+                    status: .idle,
+                    requestID: nil,
+                    transcribedText: nil,
+                    resultCreatedAt: nil,
+                    lastError: nil,
+                    interfaceLanguage: self.latestState.interfaceLanguage
+                )
+
+                self.statusLabel.text = self.localized(
+                    chinese: "已自动插入",
+                    english: "Inserted"
+                )
+                self.sendCommand(.acknowledgeResult, requestID: requestID)
+            } else {
+                // Keep the completed result in the bridge. The microphone
+                // button can retry insertion manually instead of losing text.
+                self.statusLabel.text = self.localized(
+                    chinese: "自动插入失败 · 点麦克风可再试",
+                    english: "Auto-insert failed · tap the microphone to retry"
+                )
+            }
+        }
     }
 
     private var selectedMode: TranscriptionMode {
