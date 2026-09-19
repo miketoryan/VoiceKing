@@ -108,6 +108,16 @@ private struct HomeView: View {
                 }
             }
             .navigationTitle("VoiceKing")
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Spacer()
+                    Text("v0.3.6.1 · build 10")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 16)
+                }
+                .background(.clear)
+            }
         }
     }
 }
@@ -180,7 +190,7 @@ private struct HelpView: View {
                 }
 
                 Section("版本") {
-                    LabeledContent("VoiceKing", value: "0.3.6 Typeless-PiP 测试版")
+                    LabeledContent("VoiceKing", value: "0.3.6.1 · build 10")
                 }
             }
             .navigationTitle("说明")
