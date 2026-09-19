@@ -259,7 +259,7 @@ final class AppModel: ObservableObject {
             noteKeyboardHeartbeat()
             beginFinishingRecording(
                 expectedRequestID: request.requestID,
-                deactivateMicrophoneAfterCapture: true
+                deactivateMicrophoneAfterCapture: false
             )
 
         case .acknowledgeResult:
