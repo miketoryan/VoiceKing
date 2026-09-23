@@ -60,6 +60,8 @@ final class KeyboardViewController: UIInputViewController {
     private var commandTask: Task<Void, Never>?
     private var hostResolutionTask: Task<Void, Never>?
     private var backgroundStartFallbackTask: Task<Void, Never>?
+    private var handoffWatchdogTask: Task<Void, Never>?
+    private var recoveryTask: Task<Void, Never>?
 
     private enum Defaults {
         static let transcriptionMode = "voiceking.transcription-mode"
@@ -110,6 +112,8 @@ final class KeyboardViewController: UIInputViewController {
         commandTask?.cancel()
         hostResolutionTask?.cancel()
         backgroundStartFallbackTask?.cancel()
+        handoffWatchdogTask?.cancel()
+        recoveryTask?.cancel()
     }
 
     private func configureUI() {
@@ -230,6 +234,11 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
+        if pendingAutoRecordingAfterLaunch || latestState.status == .starting {
+            retryStalledStart()
+            return
+        }
+
         guard latestState.serviceReady else {
             launchVoiceKingAndResumeRecording()
             return
@@ -239,7 +248,9 @@ final class KeyboardViewController: UIInputViewController {
         case .recording:
             mayAutoInsert = true
             sendCommand(.stopRecording, requestID: latestState.requestID ?? currentRequestID)
-        case .starting, .transcribing:
+        case .starting:
+            retryStalledStart()
+        case .transcribing:
             break
         default:
             // If VoiceKing is still alive in the background, ask it to resume
@@ -382,7 +393,10 @@ final class KeyboardViewController: UIInputViewController {
         pendingBackgroundStartRequestID = allowForegroundFallback ? requestID : nil
         latestState = BridgeState(
             serverID: latestState.serverID,
-            revision: latestState.revision &+ 1,
+            // This is only an optimistic display state. Never invent a server
+            // revision: doing so can make the keyboard reject every real state
+            // from the still-running app until that app is force-quit.
+            revision: latestState.revision,
             serviceReady: true,
             microphoneReady: latestState.microphoneReady,
             status: .starting,
@@ -443,6 +457,8 @@ final class KeyboardViewController: UIInputViewController {
                 pendingBackgroundStartRequestID = nil
                 backgroundStartFallbackTask?.cancel()
                 backgroundStartFallbackTask = nil
+                handoffWatchdogTask?.cancel()
+                handoffWatchdogTask = nil
                 mayAutoInsert = true
             } else if state.status == .error {
                 launchVoiceKingAndResumeRecording(requestID: backgroundRequestID)
@@ -459,6 +475,8 @@ final class KeyboardViewController: UIInputViewController {
                 pendingBackgroundStartRequestID = nil
                 backgroundStartFallbackTask?.cancel()
                 backgroundStartFallbackTask = nil
+                handoffWatchdogTask?.cancel()
+                handoffWatchdogTask = nil
                 mayAutoInsert = true
                 return
             }
@@ -686,7 +704,9 @@ final class KeyboardViewController: UIInputViewController {
 
                 self.latestState = BridgeState(
                     serverID: self.latestState.serverID,
-                    revision: self.latestState.revision &+ 1,
+                    // Local insertion state must not outrank the app's bridge
+                    // revision. The acknowledgement response advances it.
+                    revision: self.latestState.revision,
                     serviceReady: self.latestState.serviceReady,
                     microphoneReady: self.latestState.microphoneReady,
                     status: .idle,
@@ -740,6 +760,7 @@ final class KeyboardViewController: UIInputViewController {
         currentRequestID = requestID
         mayAutoInsert = true
         pendingAutoRecordingAfterLaunch = true
+        startHandoffWatchdog(requestID: requestID)
         statusLabel.text = localized(
             chinese: "后台启动失败，正在唤醒 VoiceKing…",
             english: "Background start failed. Waking VoiceKing…"
@@ -788,6 +809,8 @@ final class KeyboardViewController: UIInputViewController {
 
         guard let url = components.url else {
             pendingAutoRecordingAfterLaunch = false
+            handoffWatchdogTask?.cancel()
+            handoffWatchdogTask = nil
             return
         }
 
@@ -807,11 +830,88 @@ final class KeyboardViewController: UIInputViewController {
 
             if !self.openURLViaResponderChain(url) {
                 self.pendingAutoRecordingAfterLaunch = false
+                self.handoffWatchdogTask?.cancel()
+                self.handoffWatchdogTask = nil
                 self.statusLabel.text = self.localized(
                     chinese: "无法自动打开 VoiceKing，请手动启动服务",
                     english: "Could not open VoiceKing. Start the service manually."
                 )
                 self.refreshUI()
+            }
+        }
+    }
+
+    private func startHandoffWatchdog(requestID: String) {
+        handoffWatchdogTask?.cancel()
+        handoffWatchdogTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(4)) }
+            catch { return }
+            guard let self,
+                  self.keyboardVisible,
+                  self.pendingAutoRecordingAfterLaunch,
+                  self.currentRequestID == requestID,
+                  self.latestState.status != .recording,
+                  self.latestState.status != .transcribing else { return }
+            self.recoverStalledStart(
+                relaunchAfterRecovery: false
+            )
+        }
+    }
+
+    private func retryStalledStart() {
+        recoverStalledStart(
+            relaunchAfterRecovery: true
+        )
+    }
+
+    private func recoverStalledStart(
+        relaunchAfterRecovery: Bool
+    ) {
+        commandTask?.cancel()
+        commandTask = nil
+        backgroundStartFallbackTask?.cancel()
+        backgroundStartFallbackTask = nil
+        handoffWatchdogTask?.cancel()
+        handoffWatchdogTask = nil
+        recoveryTask?.cancel()
+
+        pendingAutoRecordingAfterLaunch = false
+        pendingBackgroundStartRequestID = nil
+        statusLabel.text = localized(
+            chinese: "正在重置未完成的启动…",
+            english: "Resetting the stalled start…"
+        )
+
+        let newRequestID = UUID().uuidString
+        let bridge = bridge
+        recoveryTask = Task { @MainActor [weak self] in
+            let recoveredState = try? await bridge.send(
+                .recoverStalledRecording,
+                // Reset whichever abandoned start the still-running app owns.
+                // The keyboard may already have a newer optimistic request ID.
+                requestID: nil
+            )
+            guard let self, !Task.isCancelled else { return }
+            self.recoveryTask = nil
+            if let recoveredState {
+                self.apply(recoveredState)
+            }
+            guard self.keyboardVisible else { return }
+
+            if relaunchAfterRecovery {
+                self.launchVoiceKingAndResumeRecording(requestID: newRequestID)
+            } else {
+                self.currentRequestID = nil
+                self.mayAutoInsert = false
+                self.statusLabel.text = self.localized(
+                    chinese: "唤醒未完成 · 点击麦克风重试",
+                    english: "Wake did not finish · tap the microphone to retry"
+                )
+                self.applyMicStyle(
+                    title: self.localized(chinese: "重新唤醒", english: "Retry wake"),
+                    symbol: "mic",
+                    color: .systemOrange
+                )
             }
         }
     }

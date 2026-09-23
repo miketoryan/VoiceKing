@@ -271,6 +271,10 @@ final class AppModel: ObservableObject {
                 deactivateMicrophoneAfterCapture: false
             )
 
+        case .recoverStalledRecording:
+            noteKeyboardHeartbeat()
+            await recoverStalledRecording(expectedRequestID: request.requestID)
+
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
 
@@ -313,6 +317,10 @@ final class AppModel: ObservableObject {
             do {
                 try await self.performAudioOperationWithRetry {
                     try self.audio.arm()
+                }
+                guard !Task.isCancelled else {
+                    self.audio.disarm()
+                    return false
                 }
                 guard self.serviceReady else {
                     self.audio.disarm()
@@ -379,9 +387,16 @@ final class AppModel: ObservableObject {
             publishError("VoiceKing received an invalid recording request.")
             return
         }
-        guard bridgeStatus != .recording,
-              bridgeStatus != .starting,
-              bridgeStatus != .transcribing else {
+
+        // A keyboard process can be suspended while the app remains alive.
+        // If that leaves an old start/recording request behind, a new tap must
+        // replace it instead of being ignored forever. Repeating the same
+        // request is idempotent; transcription is never interrupted.
+        if bridgeStatus == .recording || bridgeStatus == .starting {
+            guard activeRequestID != requestID else { return }
+            discardActiveCapture()
+        }
+        guard bridgeStatus != .transcribing else {
             return
         }
 
@@ -400,6 +415,37 @@ final class AppModel: ObservableObject {
         } catch {
             publishError(error.localizedDescription, requestID: requestID)
         }
+    }
+
+    private func recoverStalledRecording(expectedRequestID: String?) async {
+        guard bridgeStatus != .transcribing,
+              bridgeStatus != .completed else { return }
+        guard expectedRequestID == nil
+                || activeRequestID == nil
+                || activeRequestID == expectedRequestID else { return }
+
+        let pendingActivation = audioActivationTask
+        pendingActivation?.cancel()
+        if let pendingActivation {
+            _ = await pendingActivation.value
+        }
+        audioActivationTask = nil
+        discardActiveCapture()
+        audio.disarm()
+        bridgeStatus = .idle
+        bridgeError = nil
+        lastError = nil
+        clearResult()
+        statusText = ui("等待重新启动语音输入", "Waiting to restart dictation")
+        markStateChanged()
+    }
+
+    private func discardActiveCapture() {
+        if let url = audio.endCapture() ?? activeRecordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        activeRecordingURL = nil
+        activeRequestID = nil
     }
 
     private func finishRecordingFromKeyboard(

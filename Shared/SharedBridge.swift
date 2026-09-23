@@ -43,6 +43,7 @@ enum BridgeAction: String, Codable, Sendable, Equatable {
     case keyboardHidden
     case startRecording
     case stopRecording
+    case recoverStalledRecording
     case acknowledgeResult
 }
 
