@@ -25,7 +25,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: brew install xcodegen ripgrep
 
       - name: Validate current voice-only source
         run: |
