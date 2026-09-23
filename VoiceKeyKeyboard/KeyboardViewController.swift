@@ -61,9 +61,7 @@ final class KeyboardViewController: UIInputViewController {
     private var hostResolutionTask: Task<Void, Never>?
     private var backgroundStartFallbackTask: Task<Void, Never>?
     private var handoffWatchdogTask: Task<Void, Never>?
-    private var recoveryTask: Task<Void, Never>?
     private var urlOpenFallbackTask: Task<Void, Never>?
-    private var urlOpenAttemptID: UUID?
 
     private enum Defaults {
         static let transcriptionMode = "voiceking.transcription-mode"
@@ -115,7 +113,6 @@ final class KeyboardViewController: UIInputViewController {
         hostResolutionTask?.cancel()
         backgroundStartFallbackTask?.cancel()
         handoffWatchdogTask?.cancel()
-        recoveryTask?.cancel()
         urlOpenFallbackTask?.cancel()
     }
 
@@ -256,12 +253,14 @@ final class KeyboardViewController: UIInputViewController {
         case .transcribing:
             break
         default:
-            // If VoiceKing is still alive in the background, ask it to resume
-            // its microphone directly. Only use foreground wake-and-return as
-            // an automatic recovery when background activation really fails.
-            startRecordingRequest(
-                allowForegroundFallback: !latestState.microphoneReady
-            )
+            // A warm input engine can record directly. Once the microphone has
+            // gone cold, wake VoiceKing first; iOS does not reliably reactivate
+            // a stopped audio session from the background.
+            if latestState.microphoneReady {
+                startRecordingRequest(allowForegroundFallback: true)
+            } else {
+                launchVoiceKingAndResumeRecording()
+            }
         }
     }
 
@@ -464,7 +463,6 @@ final class KeyboardViewController: UIInputViewController {
                 handoffWatchdogTask = nil
                 urlOpenFallbackTask?.cancel()
                 urlOpenFallbackTask = nil
-                urlOpenAttemptID = nil
                 mayAutoInsert = true
             } else if state.status == .error {
                 launchVoiceKingAndResumeRecording(requestID: backgroundRequestID)
@@ -485,7 +483,6 @@ final class KeyboardViewController: UIInputViewController {
                 handoffWatchdogTask = nil
                 urlOpenFallbackTask?.cancel()
                 urlOpenFallbackTask = nil
-                urlOpenAttemptID = nil
                 mayAutoInsert = true
                 return
             }
@@ -759,7 +756,10 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    private func launchVoiceKingAndResumeRecording(requestID suppliedRequestID: String? = nil) {
+    private func launchVoiceKingAndResumeRecording(
+        requestID suppliedRequestID: String? = nil,
+        startWatchdog: Bool = true
+    ) {
         guard !pendingAutoRecordingAfterLaunch else { return }
 
         let requestID = suppliedRequestID ?? UUID().uuidString
@@ -769,7 +769,9 @@ final class KeyboardViewController: UIInputViewController {
         currentRequestID = requestID
         mayAutoInsert = true
         pendingAutoRecordingAfterLaunch = true
-        startHandoffWatchdog(requestID: requestID)
+        if startWatchdog {
+            startHandoffWatchdog(requestID: requestID)
+        }
         statusLabel.text = localized(
             chinese: "后台启动失败，正在唤醒 VoiceKing…",
             english: "Background start failed. Waking VoiceKing…"
@@ -823,56 +825,16 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        let attemptID = UUID()
-        urlOpenAttemptID = attemptID
+        // Restore the proven v0.4.2 handoff path. SwiftUI openURL is the
+        // primary request; success is confirmed by the keyboard disappearing
+        // or by the app reporting this request, never by an optimistic API
+        // completion Boolean.
         urlOpenFallbackTask?.cancel()
-
-        // Ask iOS to open the URL on the extension's behalf and inspect the
-        // completion result. A method merely existing does not mean the system
-        // accepted the foreground transition.
-        if let extensionContext {
-            extensionContext.open(url) { [weak self] success in
-                Task { @MainActor in
-                    guard let self,
-                          self.urlOpenAttemptID == attemptID else { return }
-                    if success {
-                        self.urlOpenAttemptID = nil
-                        self.urlOpenFallbackTask?.cancel()
-                        self.urlOpenFallbackTask = nil
-                    } else {
-                        self.beginLegacyOpenFallback(url, attemptID: attemptID)
-                    }
-                }
-            }
-        } else {
-            beginLegacyOpenFallback(url, attemptID: attemptID)
-            return
-        }
-
-        // Some keyboard hosts do not invoke the completion handler. Use the
-        // existing sideload fallbacks after a short bounded wait.
-        urlOpenFallbackTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(350)) }
-            catch { return }
-            guard let self,
-                  self.urlOpenAttemptID == attemptID,
-                  self.keyboardVisible,
-                  self.pendingAutoRecordingAfterLaunch else { return }
-            self.beginLegacyOpenFallback(url, attemptID: attemptID)
-        }
-    }
-
-    private func beginLegacyOpenFallback(_ url: URL, attemptID: UUID) {
-        guard urlOpenAttemptID == attemptID else { return }
-        urlOpenAttemptID = nil
-        urlOpenFallbackTask?.cancel()
-        urlOpenFallbackTask = nil
-
         urlLauncher.open(url)
 
         // Personal-sideload fallback. If SwiftUI has already opened VoiceKing,
         // viewWillDisappear clears keyboardVisible and this path is skipped.
-        Task { @MainActor [weak self] in
+        urlOpenFallbackTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(600)) }
             catch { return }
             guard let self,
@@ -903,20 +865,19 @@ final class KeyboardViewController: UIInputViewController {
                   self.currentRequestID == requestID,
                   self.latestState.status != .recording,
                   self.latestState.status != .transcribing else { return }
-            self.recoverStalledStart(
-                relaunchAfterRecovery: false
+
+            // Retry the actual foreground handoff once. Do not block the jump
+            // behind a five-second localhost recovery request.
+            self.retryStalledStart(
+                requestID: requestID,
+                startWatchdog: false
             )
         }
     }
 
-    private func retryStalledStart() {
-        recoverStalledStart(
-            relaunchAfterRecovery: true
-        )
-    }
-
-    private func recoverStalledStart(
-        relaunchAfterRecovery: Bool
+    private func retryStalledStart(
+        requestID: String = UUID().uuidString,
+        startWatchdog: Bool = true
     ) {
         commandTask?.cancel()
         commandTask = nil
@@ -926,48 +887,19 @@ final class KeyboardViewController: UIInputViewController {
         handoffWatchdogTask = nil
         urlOpenFallbackTask?.cancel()
         urlOpenFallbackTask = nil
-        urlOpenAttemptID = nil
-        recoveryTask?.cancel()
 
         pendingAutoRecordingAfterLaunch = false
         pendingBackgroundStartRequestID = nil
-        statusLabel.text = localized(
-            chinese: "正在重置未完成的启动…",
-            english: "Resetting the stalled start…"
+        currentRequestID = requestID
+        mayAutoInsert = true
+
+        // Foreground startService() already clears abandoned activation and
+        // capture state. Reopen first so a stale background bridge can never
+        // prevent the user from reaching VoiceKing.
+        launchVoiceKingAndResumeRecording(
+            requestID: requestID,
+            startWatchdog: startWatchdog
         )
-
-        let newRequestID = UUID().uuidString
-        let bridge = bridge
-        recoveryTask = Task { @MainActor [weak self] in
-            let recoveredState = try? await bridge.send(
-                .recoverStalledRecording,
-                // Reset whichever abandoned start the still-running app owns.
-                // The keyboard may already have a newer optimistic request ID.
-                requestID: nil
-            )
-            guard let self, !Task.isCancelled else { return }
-            self.recoveryTask = nil
-            if let recoveredState {
-                self.apply(recoveredState)
-            }
-            guard self.keyboardVisible else { return }
-
-            if relaunchAfterRecovery {
-                self.launchVoiceKingAndResumeRecording(requestID: newRequestID)
-            } else {
-                self.currentRequestID = nil
-                self.mayAutoInsert = false
-                self.statusLabel.text = self.localized(
-                    chinese: "唤醒未完成 · 点击麦克风重试",
-                    english: "Wake did not finish · tap the microphone to retry"
-                )
-                self.applyMicStyle(
-                    title: self.localized(chinese: "重新唤醒", english: "Retry wake"),
-                    symbol: "mic",
-                    color: .systemOrange
-                )
-            }
-        }
     }
 
     private func resolveHostBundleIdentifier() async -> String? {
@@ -985,14 +917,8 @@ final class KeyboardViewController: UIInputViewController {
 
         while let current = responder {
             if current.responds(to: selector) {
-                typealias OpenURL = @convention(c) (
-                    AnyObject,
-                    Selector,
-                    NSURL
-                ) -> Bool
-                let implementation = current.method(for: selector)
-                let openURL = unsafeBitCast(implementation, to: OpenURL.self)
-                return openURL(current, selector, url as NSURL)
+                current.perform(selector, with: url)
+                return true
             }
             responder = current.next
         }

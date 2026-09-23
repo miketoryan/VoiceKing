@@ -4,7 +4,7 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.5.4 flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.5.5 flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
@@ -62,7 +62,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.5.4: validates that real PCM frames reach the recording file before accepting a background microphone start. If iOS lights the microphone indicator without delivering audio, VoiceKing closes that false start and immediately uses foreground wake-and-return. URL opening now uses the extension context result first and reads the responder-chain fallback's actual Boolean result. The v0.5.3 stale-state recovery remains in place.
+v0.5.5: restores the proven v0.4.2 foreground handoff path without restoring silent background audio or Picture in Picture. A cold microphone now wakes VoiceKing immediately, a warm engine may still record directly, real PCM validation remains required, repeated taps retry the foreground handoff without waiting on a stalled localhost recovery, and the microphone still closes about 10 seconds after leaving the keyboard.
 
 ## Acknowledgements
 

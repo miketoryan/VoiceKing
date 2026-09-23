@@ -49,6 +49,12 @@ jobs:
           fi
           rg -q 'waitForCapturedAudio' VoiceKey/AppModel.swift
           rg -q 'hasWrittenAudioFrames' VoiceKey/Services/AudioService.swift
+          rg -q 'UIApplication.shared.applicationState' VoiceKey/AppModel.swift
+          rg -q 'urlLauncher.open(url)' VoiceKeyKeyboard/KeyboardViewController.swift
+          if rg -n 'extensionContext\.open' VoiceKeyKeyboard; then
+            echo "Do not treat extension-context acceptance as a completed app handoff."
+            exit 1
+          fi
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -87,8 +93,8 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP_PLIST")" != ""
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$KEYBOARD_PLIST")" = "com.apple.keyboard-service"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$KEYBOARD_PLIST")" = "true"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "0.5.4"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "22"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "0.5.5"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "23"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$KEYBOARD_PLIST")"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$KEYBOARD_PLIST")"
 

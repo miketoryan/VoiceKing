@@ -257,7 +257,21 @@ final class AppModel: ObservableObject {
 
         case .startRecording:
             noteKeyboardHeartbeat()
-            if await activateMicrophoneForRecording() {
+
+            // Once the input engine has gone cold, iOS does not reliably allow
+            // a background app to reactivate microphone capture. Do not accept
+            // AVAudioEngine's superficial "running" state as a usable start;
+            // tell the keyboard to wake VoiceKing in the foreground instead.
+            if !audio.isRunning,
+               UIApplication.shared.applicationState != .active {
+                publishError(
+                    ui(
+                        "麦克风已休眠，正在唤醒 VoiceKing",
+                        "The microphone is asleep. Waking VoiceKing."
+                    ),
+                    requestID: request.requestID
+                )
+            } else if await activateMicrophoneForRecording() {
                 await startRecordingFromKeyboard(
                     requestID: request.requestID,
                     mode: request.mode ?? .smart
