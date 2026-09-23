@@ -4,7 +4,7 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.5.1 flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.5.2 flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
@@ -62,7 +62,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.5.1: keeps the current voice-only behavior, accepts bridge heartbeats from resident v0.4/v0.5 keyboard processes after an over-the-top sideload, starts the 10-second microphone shutdown lease even when the keyboard cannot reconnect, reports keyboard disappearance explicitly when iOS delivers the lifecycle event, and retains the no-silent-playback rule.
+v0.5.2: keeps the v0.5.1 bridge and microphone-safety fixes and clarifies the two microphone-off keyboard states as “service unavailable, tap to wake” and “service online, tap to speak.”
 
 ## Acknowledgements
 

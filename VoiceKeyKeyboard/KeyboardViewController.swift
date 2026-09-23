@@ -361,8 +361,8 @@ final class KeyboardViewController: UIInputViewController {
                 }
                 self.latestState = .unavailable(
                     self.localized(
-                        chinese: "VoiceKing 未响应，点语音按钮可自动唤醒",
-                        english: "VoiceKing did not respond. Tap the microphone to wake it."
+                        chinese: "服务未连接 · 点击唤醒",
+                        english: "Service unavailable · tap to wake"
                     ),
                     interfaceLanguage: self.latestState.interfaceLanguage
                 )
@@ -495,8 +495,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         latestState = .unavailable(
             localized(
-                chinese: "服务休眠，点语音按钮可自动唤醒",
-                english: "Service is sleeping. Tap the microphone to wake it."
+                chinese: "服务未连接 · 点击唤醒",
+                english: "Service unavailable · tap to wake"
             ),
             interfaceLanguage: latestState.interfaceLanguage
         )
@@ -563,7 +563,7 @@ final class KeyboardViewController: UIInputViewController {
         case .idle:
             statusLabel.text = latestState.microphoneReady
                 ? localized(chinese: "点击说话", english: "Tap to speak")
-                : localized(chinese: "点击说话 · 后台直接启动", english: "Tap to speak · starts in background")
+                : localized(chinese: "服务在线 · 点击开始说话", english: "Service online · tap to speak")
             applyMicStyle(
                 title: localized(chinese: "开始说话", english: "Start speaking"),
                 symbol: "mic.fill",
