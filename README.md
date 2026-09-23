@@ -4,7 +4,7 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.0 test flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.5.0 flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
@@ -42,9 +42,10 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 ## Microphone lifecycle
 
 - The microphone starts only after the user taps the VoiceKing voice button.
+- Tapping stop ends file writing immediately. While the VoiceKing keyboard remains visible, the microphone engine stays ready for the next dictation.
 - Leaving the input interface starts a 10-second grace period.
 - If the keyboard does not return during that period, capture stops. An active recording is finished and transcribed; an idle microphone is closed.
-- The background service keeps only a silent audio session alive so the localhost bridge remains reachable. It resumes capture directly when iOS permits; otherwise the keyboard automatically falls back to foreground wake-and-return.
+- VoiceKing does not play silent audio in the background. It resumes capture directly only while iOS still allows the app to respond; otherwise the keyboard automatically falls back to foreground wake-and-return.
 
 ## Build and sideload
 
@@ -61,7 +62,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.0 background-first test: direct background recording when the service is alive, automatic recovery wake, automatic result insertion, automatic spoken-language detection, interface-only Chinese/English setting, matching app/extension versions, and all obsolete floating-media experiments removed.
+v0.5.0: promotes the current voice-only implementation to the main branch, keeps the microphone engine ready while the keyboard is visible, closes it about 10 seconds after leaving the input interface, removes all silent background-audio playback, and preserves background-first recording with automatic wake-and-return recovery.
 
 ## Acknowledgements
 

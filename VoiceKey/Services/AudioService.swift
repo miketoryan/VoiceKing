@@ -4,7 +4,6 @@ import Foundation
 final class AudioService: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let lock = NSLock()
-    private var keepAlivePlayer: AVAudioPlayer?
     private var outputFile: AVAudioFile?
     private var currentURL: URL?
     private var tapInstalled = false
@@ -14,10 +13,6 @@ final class AudioService: @unchecked Sendable {
 
     var isRunning: Bool {
         isArmed && engine.isRunning
-    }
-
-    var isKeepingAlive: Bool {
-        keepAlivePlayer?.isPlaying == true
     }
 
     static func requestPermission() async -> Bool {
@@ -30,8 +25,6 @@ final class AudioService: @unchecked Sendable {
 
     func arm() throws {
         guard !isRunning else { return }
-
-        stopKeepAlive()
 
         let session = AVAudioSession.sharedInstance()
         try prepareCaptureSession(session)
@@ -61,24 +54,10 @@ final class AudioService: @unchecked Sendable {
 
     func enterStandby() throws {
         stopCaptureEngine()
-
         let session = AVAudioSession.sharedInstance()
-        // Keep the already-authorized play-and-record session active while
-        // only playing silence. The input engine is stopped, so the privacy
-        // indicator turns off, but the app can resume input from the keyboard
-        // without changing audio categories in the background.
-        try prepareCaptureSession(session)
-
-        if keepAlivePlayer == nil {
-            let player = try AVAudioPlayer(data: Self.silentWAVData)
-            player.numberOfLoops = -1
-            player.volume = 1
-            player.prepareToPlay()
-            keepAlivePlayer = player
-        }
-
-        guard keepAlivePlayer?.play() == true else {
-            throw AudioError.keepAliveFailed
+        if audioSessionIsActive {
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+            audioSessionIsActive = false
         }
     }
 
@@ -111,7 +90,6 @@ final class AudioService: @unchecked Sendable {
 
     func disarm() {
         stopCaptureEngine()
-        stopKeepAlive()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         audioSessionIsActive = false
     }
@@ -148,11 +126,6 @@ final class AudioService: @unchecked Sendable {
         isArmed = false
     }
 
-    private func stopKeepAlive() {
-        keepAlivePlayer?.stop()
-        keepAlivePlayer?.currentTime = 0
-    }
-
     private func consume(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
         let file = outputFile
@@ -162,54 +135,15 @@ final class AudioService: @unchecked Sendable {
         lock.unlock()
     }
 
-    private static let silentWAVData: Data = {
-        let sampleRate: UInt32 = 8_000
-        let channels: UInt16 = 1
-        let bitsPerSample: UInt16 = 16
-        let seconds: UInt32 = 1
-        let bytesPerSample = UInt32(bitsPerSample / 8)
-        let dataSize = sampleRate * UInt32(channels) * bytesPerSample * seconds
-        let byteRate = sampleRate * UInt32(channels) * bytesPerSample
-        let blockAlign = channels * (bitsPerSample / 8)
-
-        var data = Data()
-        data.append(contentsOf: Array("RIFF".utf8))
-        data.appendLittleEndian(UInt32(36) + dataSize)
-        data.append(contentsOf: Array("WAVE".utf8))
-        data.append(contentsOf: Array("fmt ".utf8))
-        data.appendLittleEndian(UInt32(16))
-        data.appendLittleEndian(UInt16(1))
-        data.appendLittleEndian(channels)
-        data.appendLittleEndian(sampleRate)
-        data.appendLittleEndian(byteRate)
-        data.appendLittleEndian(blockAlign)
-        data.appendLittleEndian(bitsPerSample)
-        data.append(contentsOf: Array("data".utf8))
-        data.appendLittleEndian(dataSize)
-        data.append(Data(count: Int(dataSize)))
-        return data
-    }()
-
     enum AudioError: LocalizedError {
         case noInput
         case notArmed
-        case keepAliveFailed
 
         var errorDescription: String? {
             switch self {
             case .noInput: "No microphone input is available."
             case .notArmed: "Start the VoiceKing keyboard service first."
-            case .keepAliveFailed: "VoiceKing could not keep its background service active."
             }
-        }
-    }
-}
-
-private extension Data {
-    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
-        var littleEndian = value.littleEndian
-        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
-            append(contentsOf: bytes)
         }
     }
 }

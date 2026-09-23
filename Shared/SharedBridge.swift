@@ -2,7 +2,7 @@ import Foundation
 
 enum LocalBridge {
     static let port = 14_557
-    static let protocolVersion = "7"
+    static let protocolVersion = "8"
     static let keyboardHeartbeatInterval: Duration = .seconds(2)
     static let keyboardExitGracePeriod: TimeInterval = 10
     static let resultValidity: TimeInterval = 300

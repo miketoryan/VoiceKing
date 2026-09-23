@@ -127,7 +127,7 @@ private struct HomeView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Spacer()
-                    Text("v0.4.0 · build 17")
+                    Text("v0.5.0 · build 18")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.trailing, 16)
@@ -175,8 +175,8 @@ private struct SettingsView: View {
 
                 Section(t("麦克风", "Microphone")) {
                     Text(t(
-                        "VoiceKing 在后台运行时，键盘优先直接启动录音，不再切换到主程序；只有后台服务失效时才会自动唤醒主程序恢复。退出输入界面10秒后关闭麦克风。",
-                        "When VoiceKing is running in the background, the keyboard starts recording directly without switching apps. It wakes the main app only if background recovery is required. The microphone closes 10 seconds after leaving the input screen."
+                        "VoiceKing 在后台仍可响应时，键盘优先直接启动录音；如果系统已挂起主程序，则自动唤醒主程序恢复。录音结束后停止写入文件，但键盘仍显示时麦克风引擎继续待命；退出输入界面约10秒后关闭麦克风。后台不播放静音音频。",
+                        "When VoiceKing is still responsive in the background, the keyboard starts recording directly. If iOS has suspended the app, VoiceKing wakes automatically for recovery. After recording stops, file writing ends while the microphone engine remains ready as long as the keyboard is visible. The microphone closes about 10 seconds after leaving the input screen. No silent audio is played in the background."
                     ))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -254,7 +254,7 @@ private struct HelpView: View {
                 }
 
                 Section(t("版本", "Version")) {
-                    LabeledContent("VoiceKing", value: "0.4.0 · build 17")
+                    LabeledContent("VoiceKing", value: "0.5.0 · build 18")
                 }
             }
             .navigationTitle(t("说明", "Help"))
