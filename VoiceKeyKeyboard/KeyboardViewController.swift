@@ -77,15 +77,27 @@ final class KeyboardViewController: UIInputViewController {
         keyboardVisible = true
         if currentRequestID != nil { mayAutoInsert = true }
         resolveHostApplicationInAdvance()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         startBridgeTasks()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
+        notifyKeyboardHidden()
         keyboardVisible = false
         mayAutoInsert = false
         insertionScheduledForRequestID = nil
         stopBridgeTasks()
         super.viewWillDisappear(animated)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        notifyKeyboardHidden()
+        keyboardVisible = false
+        stopBridgeTasks()
+        super.viewDidDisappear(animated)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -288,14 +300,40 @@ final class KeyboardViewController: UIInputViewController {
 
     private func sendHeartbeat() async {
         guard keyboardVisible else { return }
+        guard isKeyboardActuallyVisible else {
+            notifyKeyboardHidden()
+            keyboardVisible = false
+            stopBridgeTasks()
+            return
+        }
         do { apply(try await bridge.send(.heartbeat)) }
         catch { applyConnectionFailure() }
     }
 
     private func fetchState() async {
-        guard keyboardVisible else { return }
+        guard keyboardVisible, isKeyboardActuallyVisible else { return }
         do { apply(try await bridge.fetchState()) }
         catch { applyConnectionFailure() }
+    }
+
+    private var isKeyboardActuallyVisible: Bool {
+        guard isViewLoaded,
+              let window = view.window,
+              !window.isHidden,
+              window.alpha > 0,
+              !view.isHidden,
+              view.alpha > 0,
+              !view.bounds.isEmpty else { return false }
+
+        let visibleFrame = view.convert(view.bounds, to: window)
+        return window.bounds.intersects(visibleFrame)
+    }
+
+    private func notifyKeyboardHidden() {
+        let bridge = bridge
+        Task {
+            _ = try? await bridge.send(.keyboardHidden)
+        }
     }
 
     private func sendCommand(

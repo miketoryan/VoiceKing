@@ -188,6 +188,12 @@ final class AppModel: ObservableObject {
             return
         }
 
+        // Establish a ten-second lease before returning to the host. An older
+        // keyboard extension may still be resident after a sideload update. If
+        // it never reconnects, the microphone monitor must still shut down the
+        // real input engine instead of waiting forever for its first heartbeat.
+        noteKeyboardHeartbeat()
+
         if let requestID, !requestID.isEmpty {
             startRecordingFromKeyboard(
                 requestID: requestID,
@@ -246,6 +252,9 @@ final class AppModel: ObservableObject {
         case .heartbeat:
             noteKeyboardHeartbeat()
 
+        case .keyboardHidden:
+            noteKeyboardExit()
+
         case .startRecording:
             noteKeyboardHeartbeat()
             if await activateMicrophoneForRecording() {
@@ -274,6 +283,17 @@ final class AppModel: ObservableObject {
         guard serviceReady else { return }
         lastKeyboardHeartbeat = Date()
         keyboardHasConnected = true
+    }
+
+    private func noteKeyboardExit() {
+        guard serviceReady else { return }
+        // Use the exit time as the final lease timestamp. The existing monitor
+        // then performs the same delayed shutdown used for a missed heartbeat.
+        lastKeyboardHeartbeat = Date()
+        keyboardHasConnected = true
+        if audio.isRunning {
+            startKeyboardMonitor()
+        }
     }
 
     private func activateMicrophoneForRecording() async -> Bool {

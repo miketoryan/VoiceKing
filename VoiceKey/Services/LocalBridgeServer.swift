@@ -134,7 +134,8 @@ final class LocalBridgeServer: @unchecked Sendable {
         let headers = headerPairs.reduce(into: [String: String]()) { result, pair in
             result[pair.0] = pair.1
         }
-        guard headers["x-voiceking-protocol"] == LocalBridge.protocolVersion else {
+        guard let protocolVersion = headers["x-voiceking-protocol"],
+              LocalBridge.compatibleProtocolVersions.contains(protocolVersion) else {
             return .invalid
         }
 
