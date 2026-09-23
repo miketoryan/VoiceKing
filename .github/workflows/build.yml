@@ -50,7 +50,7 @@ jobs:
           rg -q 'waitForCapturedAudio' VoiceKey/AppModel.swift
           rg -q 'hasWrittenAudioFrames' VoiceKey/Services/AudioService.swift
           rg -q 'UIApplication.shared.applicationState' VoiceKey/AppModel.swift
-          rg -q 'urlLauncher.open(url)' VoiceKeyKeyboard/KeyboardViewController.swift
+          rg -Fq 'urlLauncher.open(url)' VoiceKeyKeyboard/KeyboardViewController.swift
           if rg -n 'extensionContext\.open' VoiceKeyKeyboard; then
             echo "Do not treat extension-context acceptance as a completed app handoff."
             exit 1
