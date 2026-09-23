@@ -8,6 +8,7 @@ final class AudioService: @unchecked Sendable {
     private var currentURL: URL?
     private var tapInstalled = false
     private var audioSessionIsActive = false
+    private var writtenFrameCount: AVAudioFramePosition = 0
 
     private(set) var isArmed = false
 
@@ -74,6 +75,7 @@ final class AudioService: @unchecked Sendable {
         lock.lock()
         outputFile = file
         currentURL = url
+        writtenFrameCount = 0
         lock.unlock()
 
         return url
@@ -84,8 +86,16 @@ final class AudioService: @unchecked Sendable {
         outputFile = nil
         let url = currentURL
         currentURL = nil
+        writtenFrameCount = 0
         lock.unlock()
         return url
+    }
+
+    func hasWrittenAudioFrames(minimum: AVAudioFramePosition = 2_048) -> Bool {
+        lock.lock()
+        let result = outputFile != nil && writtenFrameCount >= minimum
+        lock.unlock()
+        return result
     }
 
     func disarm() {
@@ -113,6 +123,7 @@ final class AudioService: @unchecked Sendable {
         lock.lock()
         outputFile = nil
         currentURL = nil
+        writtenFrameCount = 0
         lock.unlock()
 
         if engine.isRunning {
@@ -130,7 +141,13 @@ final class AudioService: @unchecked Sendable {
         lock.lock()
         let file = outputFile
         if let file {
-            try? file.write(from: buffer)
+            do {
+                try file.write(from: buffer)
+                writtenFrameCount += AVAudioFramePosition(buffer.frameLength)
+            } catch {
+                // A capture with no successfully written PCM frames is treated
+                // as a failed background start by the app model.
+            }
         }
         lock.unlock()
     }

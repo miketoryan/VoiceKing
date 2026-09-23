@@ -62,6 +62,8 @@ final class KeyboardViewController: UIInputViewController {
     private var backgroundStartFallbackTask: Task<Void, Never>?
     private var handoffWatchdogTask: Task<Void, Never>?
     private var recoveryTask: Task<Void, Never>?
+    private var urlOpenFallbackTask: Task<Void, Never>?
+    private var urlOpenAttemptID: UUID?
 
     private enum Defaults {
         static let transcriptionMode = "voiceking.transcription-mode"
@@ -114,6 +116,7 @@ final class KeyboardViewController: UIInputViewController {
         backgroundStartFallbackTask?.cancel()
         handoffWatchdogTask?.cancel()
         recoveryTask?.cancel()
+        urlOpenFallbackTask?.cancel()
     }
 
     private func configureUI() {
@@ -459,6 +462,9 @@ final class KeyboardViewController: UIInputViewController {
                 backgroundStartFallbackTask = nil
                 handoffWatchdogTask?.cancel()
                 handoffWatchdogTask = nil
+                urlOpenFallbackTask?.cancel()
+                urlOpenFallbackTask = nil
+                urlOpenAttemptID = nil
                 mayAutoInsert = true
             } else if state.status == .error {
                 launchVoiceKingAndResumeRecording(requestID: backgroundRequestID)
@@ -477,6 +483,9 @@ final class KeyboardViewController: UIInputViewController {
                 backgroundStartFallbackTask = nil
                 handoffWatchdogTask?.cancel()
                 handoffWatchdogTask = nil
+                urlOpenFallbackTask?.cancel()
+                urlOpenFallbackTask = nil
+                urlOpenAttemptID = nil
                 mayAutoInsert = true
                 return
             }
@@ -814,9 +823,51 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        // SwiftUI's openURL environment is the supported URL handoff path from
-        // a custom keyboard. UIKit's NSExtensionContext.open is not reliable
-        // for UIInputViewController on recent iOS releases.
+        let attemptID = UUID()
+        urlOpenAttemptID = attemptID
+        urlOpenFallbackTask?.cancel()
+
+        // Ask iOS to open the URL on the extension's behalf and inspect the
+        // completion result. A method merely existing does not mean the system
+        // accepted the foreground transition.
+        if let extensionContext {
+            extensionContext.open(url) { [weak self] success in
+                Task { @MainActor in
+                    guard let self,
+                          self.urlOpenAttemptID == attemptID else { return }
+                    if success {
+                        self.urlOpenAttemptID = nil
+                        self.urlOpenFallbackTask?.cancel()
+                        self.urlOpenFallbackTask = nil
+                    } else {
+                        self.beginLegacyOpenFallback(url, attemptID: attemptID)
+                    }
+                }
+            }
+        } else {
+            beginLegacyOpenFallback(url, attemptID: attemptID)
+            return
+        }
+
+        // Some keyboard hosts do not invoke the completion handler. Use the
+        // existing sideload fallbacks after a short bounded wait.
+        urlOpenFallbackTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(350)) }
+            catch { return }
+            guard let self,
+                  self.urlOpenAttemptID == attemptID,
+                  self.keyboardVisible,
+                  self.pendingAutoRecordingAfterLaunch else { return }
+            self.beginLegacyOpenFallback(url, attemptID: attemptID)
+        }
+    }
+
+    private func beginLegacyOpenFallback(_ url: URL, attemptID: UUID) {
+        guard urlOpenAttemptID == attemptID else { return }
+        urlOpenAttemptID = nil
+        urlOpenFallbackTask?.cancel()
+        urlOpenFallbackTask = nil
+
         urlLauncher.open(url)
 
         // Personal-sideload fallback. If SwiftUI has already opened VoiceKing,
@@ -873,6 +924,9 @@ final class KeyboardViewController: UIInputViewController {
         backgroundStartFallbackTask = nil
         handoffWatchdogTask?.cancel()
         handoffWatchdogTask = nil
+        urlOpenFallbackTask?.cancel()
+        urlOpenFallbackTask = nil
+        urlOpenAttemptID = nil
         recoveryTask?.cancel()
 
         pendingAutoRecordingAfterLaunch = false
@@ -931,8 +985,14 @@ final class KeyboardViewController: UIInputViewController {
 
         while let current = responder {
             if current.responds(to: selector) {
-                current.perform(selector, with: url)
-                return true
+                typealias OpenURL = @convention(c) (
+                    AnyObject,
+                    Selector,
+                    NSURL
+                ) -> Bool
+                let implementation = current.method(for: selector)
+                let openURL = unsafeBitCast(implementation, to: OpenURL.self)
+                return openURL(current, selector, url as NSURL)
             }
             responder = current.next
         }

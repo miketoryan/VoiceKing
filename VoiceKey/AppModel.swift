@@ -195,7 +195,7 @@ final class AppModel: ObservableObject {
         noteKeyboardHeartbeat()
 
         if let requestID, !requestID.isEmpty {
-            startRecordingFromKeyboard(
+            await startRecordingFromKeyboard(
                 requestID: requestID,
                 mode: mode
             )
@@ -258,7 +258,7 @@ final class AppModel: ObservableObject {
         case .startRecording:
             noteKeyboardHeartbeat()
             if await activateMicrophoneForRecording() {
-                startRecordingFromKeyboard(
+                await startRecordingFromKeyboard(
                     requestID: request.requestID,
                     mode: request.mode ?? .smart
                 )
@@ -375,7 +375,7 @@ final class AppModel: ObservableObject {
     private func startRecordingFromKeyboard(
         requestID: String?,
         mode: TranscriptionMode
-    ) {
+    ) async {
         guard serviceReady, audio.isRunning else {
             publishError(
                 "Open VoiceKing and start Keyboard Service first.",
@@ -408,6 +408,29 @@ final class AppModel: ObservableObject {
 
         do {
             activeRecordingURL = try audio.beginCapture()
+
+            // AVAudioEngine can report `isRunning` and light iOS's microphone
+            // indicator even though a background start delivers no input
+            // buffers. Only report recording after PCM frames reach the file.
+            let captureConfirmed = await waitForCapturedAudio(
+                requestID: requestID,
+                timeout: .milliseconds(900)
+            )
+            guard captureConfirmed else {
+                guard activeRequestID == requestID,
+                      bridgeStatus == .starting else { return }
+                discardActiveCapture()
+                audio.disarm()
+                publishError(
+                    ui(
+                        "后台麦克风未产生音频，正在切换到前台启动",
+                        "Background microphone produced no audio. Waking VoiceKing."
+                    ),
+                    requestID: requestID
+                )
+                return
+            }
+
             bridgeStatus = .recording
             statusText = ui("录音中…", "Recording…")
             startKeyboardMonitor()
@@ -415,6 +438,24 @@ final class AppModel: ObservableObject {
         } catch {
             publishError(error.localizedDescription, requestID: requestID)
         }
+    }
+
+    private func waitForCapturedAudio(
+        requestID: String,
+        timeout: Duration
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+
+        while clock.now < deadline {
+            guard serviceReady,
+                  activeRequestID == requestID,
+                  bridgeStatus == .starting else { return false }
+            if audio.hasWrittenAudioFrames() { return true }
+            do { try await Task.sleep(for: .milliseconds(40)) }
+            catch { return false }
+        }
+        return audio.hasWrittenAudioFrames()
     }
 
     private func recoverStalledRecording(expectedRequestID: String?) async {

@@ -47,6 +47,8 @@ jobs:
             echo "Keyboard-only UI state must not invent bridge revisions."
             exit 1
           fi
+          rg -q 'waitForCapturedAudio' VoiceKey/AppModel.swift
+          rg -q 'hasWrittenAudioFrames' VoiceKey/Services/AudioService.swift
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -85,8 +87,8 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$APP_PLIST")" != ""
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$KEYBOARD_PLIST")" = "com.apple.keyboard-service"
           test "$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionAttributes:RequestsOpenAccess' "$KEYBOARD_PLIST")" = "true"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "0.5.3"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "21"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "0.5.4"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "22"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$KEYBOARD_PLIST")"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PLIST")" = "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$KEYBOARD_PLIST")"
 
