@@ -4,12 +4,12 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.9 fast-path flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.4.10 handoff-priority flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
 3. If the microphone is still warm and ready, recording resumes without leaving the current app. If the microphone has gone cold, VoiceKing immediately opens in the foreground, activates the microphone and starts the recording request, then automatically returns to the original app.
-4. When recording starts, VoiceKing switches the audio session to non-mixing mode so iOS interrupts audio playing from other apps. Speak while the keyboard shows the recording state.
+4. VoiceKing keeps the v0.4.2-style mixable play-and-record audio session unchanged while the microphone is warm. Speak while the keyboard shows the recording state.
 5. Tap the microphone again to finish. The keyboard shows processing and inserts the result automatically when it is ready; there is no insertion confirmation.
 
 There is no floating overlay or video-based background mode. New recordings reuse the warm microphone when it is still ready; once it is cold, VoiceKing skips the failed background restart attempt and goes straight to foreground wake-and-return.
@@ -46,17 +46,12 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 - If the keyboard does not return during that period, capture stops. An active recording is finished and transcribed; an idle microphone is closed.
 - The background service keeps only a silent audio session alive so the localhost bridge remains reachable. It resumes capture directly when iOS permits; otherwise the keyboard automatically falls back to foreground wake-and-return.
 
-## Warm microphone audio-session fix
+## Foreground handoff reliability
 
-- After a recording ends, VoiceKing keeps the current non-mixable audio session while the microphone remains warm instead of switching back to `mixWithOthers` in the background.
-- This prevents the next background recording from re-activating a non-mixable session and hitting `AVAudioSessionErrorCodeCannotInterruptOthers` (OSStatus 560557684).
-- When the keyboard actually goes away, `enterStandby()` stops the microphone engine and safely returns to the mixable silent standby session.
-
-## Foreground handoff audio-session fix
-
-- Configure the non-mixable recording session before starting AVAudioEngine.
-- Once the engine is running, starting capture only opens the recording file; it does not change AVAudioSession category/options.
-- This restores the stable v0.4.2 ordering while preserving the requirement that other app audio is interrupted during dictation.
+- Foreground wake-and-return now restores the v0.4.2 audio-session policy: one stable `.playAndRecord + mixWithOthers` session is configured before AVAudioEngine starts and is not changed when capture begins.
+- The local keyboard bridge is rebuilt during foreground handoff with a fresh server ID so a stale long-running localhost listener cannot survive into the returned keyboard session.
+- VoiceKing returns to the host app only after capture actually enters `recording`; a failed start is cleaned up instead of returning with a half-active microphone.
+- If the returned keyboard never reconnects, an orphaned recording is abandoned after 5 seconds and the microphone is returned to silent standby automatically.
 
 ## Fast upload path
 
@@ -69,7 +64,7 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 
 - Recognition language is configurable as Chinese (default), Auto, or English. Chinese sends `language=zh`; English sends `language=en`; Auto omits the language hint.
 - VoiceKing records the upload WAV as 16 kHz mono 16-bit PCM in real time when the active audio route supports conversion, removing the post-record conversion delay.
-- The recording, warm-microphone, silent-standby, smart-handoff, media interruption, cleanup, and auto-insert behavior are otherwise unchanged.
+- The warm-microphone, silent-standby, smart-handoff, cleanup, and auto-insert behavior are otherwise unchanged. Automatic interruption of other-app audio is intentionally disabled in this reliability-first build.
 
 ## Build and sideload
 
@@ -86,7 +81,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.9 fast-path test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
+v0.4.10 handoff-priority test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
 
 ## Acknowledgements
 
