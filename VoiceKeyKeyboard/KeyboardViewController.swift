@@ -230,12 +230,10 @@ final class KeyboardViewController: UIInputViewController {
         case .starting, .transcribing:
             break
         default:
-            // If VoiceKing is still alive in the background, ask it to resume
-            // its microphone directly. Only use foreground wake-and-return as
-            // an automatic recovery when background activation really fails.
-            startRecordingRequest(
-                allowForegroundFallback: !latestState.microphoneReady
-            )
+            // Always use the proven foreground wake-and-return path for a new
+            // recording. This avoids first attempting a background AVAudioSession
+            // restart that can fail with CoreAudio 2003329396 before fallback.
+            launchVoiceKingAndResumeRecording()
         }
     }
 
