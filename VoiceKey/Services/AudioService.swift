@@ -112,11 +112,13 @@ final class AudioService: @unchecked Sendable {
         currentURL = nil
         lock.unlock()
 
-        // Preserve the v0.4.2 warm-microphone behavior after dictation, but
-        // stop claiming exclusive audio so other apps are allowed to play.
-        if isArmed, engine.isRunning {
-            try? prepareWarmSession(AVAudioSession.sharedInstance())
-        }
+        // Keep the active non-mixable session while the microphone stays warm.
+        // Switching back to mixWithOthers here happens with VoiceKing already
+        // in the background and makes the next recording try to activate a
+        // non-mixable session from the background, which iOS rejects with
+        // AVAudioSessionErrorCodeCannotInterruptOthers (560557684).
+        // When the keyboard actually goes away, enterStandby() stops the engine
+        // and switches back to the mixable silent standby session safely.
         return url
     }
 
