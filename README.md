@@ -52,6 +52,12 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 - This prevents the next background recording from re-activating a non-mixable session and hitting `AVAudioSessionErrorCodeCannotInterruptOthers` (OSStatus 560557684).
 - When the keyboard actually goes away, `enterStandby()` stops the microphone engine and safely returns to the mixable silent standby session.
 
+## Foreground handoff audio-session fix
+
+- Configure the non-mixable recording session before starting AVAudioEngine.
+- Once the engine is running, starting capture only opens the recording file; it does not change AVAudioSession category/options.
+- This restores the stable v0.4.2 ordering while preserving the requirement that other app audio is interrupted during dictation.
+
 ## Fast upload path
 
 - Audio is converted to 16 kHz mono 16-bit PCM while it is being recorded, so stopping dictation no longer starts a second full-file conversion pass.
