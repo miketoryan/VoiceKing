@@ -4,7 +4,7 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.8 warm-session flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.4.9 fast-path flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
@@ -52,10 +52,17 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 - This prevents the next background recording from re-activating a non-mixable session and hitting `AVAudioSessionErrorCodeCannotInterruptOthers` (OSStatus 560557684).
 - When the keyboard actually goes away, `enterStandby()` stops the microphone engine and safely returns to the mixable silent standby session.
 
+## Fast upload path
+
+- Audio is converted to 16 kHz mono 16-bit PCM while it is being recorded, so stopping dictation no longer starts a second full-file conversion pass.
+- Normal recordings up to 12 MB build multipart data directly in memory and begin upload immediately, avoiding a second multipart temp-file write/read cycle.
+- Longer recordings automatically keep the disk-backed multipart path to bound memory use.
+- If a particular audio route cannot create the 16 kHz converter, VoiceKing falls back to the native recording format instead of failing the recording.
+
 ## Faster transcription
 
 - Recognition language is configurable as Chinese (default), Auto, or English. Chinese sends `language=zh`; English sends `language=en`; Auto omits the language hint.
-- Before upload, VoiceKing attempts to create a 16 kHz mono 16-bit PCM WAV optimized for speech. If conversion fails, it automatically falls back to the original recording so transcription is not lost.
+- VoiceKing records the upload WAV as 16 kHz mono 16-bit PCM in real time when the active audio route supports conversion, removing the post-record conversion delay.
 - The recording, warm-microphone, silent-standby, smart-handoff, media interruption, cleanup, and auto-insert behavior are otherwise unchanged.
 
 ## Build and sideload
@@ -73,7 +80,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.8 warm-session fix: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
+v0.4.9 fast-path test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
 
 ## Acknowledgements
 
