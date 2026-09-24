@@ -36,7 +36,10 @@ final class AudioService: @unchecked Sendable {
         stopKeepAlive()
 
         let session = AVAudioSession.sharedInstance()
-        try prepareWarmSession(session)
+        // Configure the final non-mixable recording session before starting
+        // AVAudioEngine. Do not change the session category after the engine
+        // is running; that transition was destabilizing foreground handoff.
+        try prepareRecordingSession(session)
 
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -87,11 +90,9 @@ final class AudioService: @unchecked Sendable {
     func beginCapture() throws -> URL {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
 
-        // Actual recording should interrupt media from other apps. The warm
-        // microphone and silent standby remain mixable; only active capture
-        // removes mixWithOthers so iOS pauses/interupts other playback.
-        try prepareRecordingSession(AVAudioSession.sharedInstance())
-
+        // AudioSession is already in its final recording configuration from
+        // arm(). Starting capture only creates the file, matching the stable
+        // v0.4.2 lifecycle and avoiding category changes on a running engine.
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("voiceking-\(UUID().uuidString)")
             .appendingPathExtension("wav")
