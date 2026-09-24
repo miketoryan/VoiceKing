@@ -4,15 +4,15 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.0 test flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.4.3 direct-handoff flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
-3. If VoiceKing is alive in the background, capture starts without an app switch. If background activation fails, VoiceKing briefly appears, starts capture in the foreground, and automatically returns to the original app.
+3. VoiceKing immediately opens in the foreground, activates the microphone and starts the recording request, then automatically returns to the original app.
 4. Speak while the keyboard shows the recording state.
 5. Tap the microphone again to finish. The keyboard shows processing and inserts the result automatically when it is ready; there is no insertion confirmation.
 
-There is no floating overlay or video-based background mode. Background resume is attempted first; wake-and-return is an automatic recovery path only when the background service cannot start a valid capture.
+There is no floating overlay or video-based background mode. New recordings intentionally use the foreground wake-and-return path first, avoiding a failed background microphone restart before handoff.
 
 ## Keyboard design
 
@@ -61,7 +61,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.0 background-first test: direct background recording when the service is alive, automatic recovery wake, automatic result insertion, automatic spoken-language detection, interface-only Chinese/English setting, matching app/extension versions, and all obsolete floating-media experiments removed.
+v0.4.3 direct-handoff test: based on the stable v0.4.2-era code. Starting a new recording immediately opens VoiceKing, activates capture in the foreground, and returns to the original app. The older silent-audio standby and warm microphone behavior are otherwise preserved, along with automatic result insertion and spoken-language detection.
 
 ## Acknowledgements
 
