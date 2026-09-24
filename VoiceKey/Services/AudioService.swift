@@ -36,10 +36,10 @@ final class AudioService: @unchecked Sendable {
         stopKeepAlive()
 
         let session = AVAudioSession.sharedInstance()
-        // Configure the final non-mixable recording session before starting
-        // AVAudioEngine. Do not change the session category after the engine
-        // is running; that transition was destabilizing foreground handoff.
-        try prepareRecordingSession(session)
+        // Match the proven v0.4.2 lifecycle: configure one stable, mixable
+        // play-and-record session before starting AVAudioEngine and keep that
+        // category unchanged while the engine remains warm.
+        try prepareCaptureSession(session)
 
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -72,7 +72,7 @@ final class AudioService: @unchecked Sendable {
         // only playing silence. The input engine is stopped, so the privacy
         // indicator turns off, but the app can resume input from the keyboard
         // without changing audio categories in the background.
-        try prepareWarmSession(session)
+        try prepareCaptureSession(session)
 
         if keepAlivePlayer == nil {
             let player = try AVAudioPlayer(data: Self.silentWAVData)
@@ -90,9 +90,9 @@ final class AudioService: @unchecked Sendable {
     func beginCapture() throws -> URL {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
 
-        // AudioSession is already in its final recording configuration from
-        // arm(). Starting capture only creates the file, matching the stable
-        // v0.4.2 lifecycle and avoiding category changes on a running engine.
+        // AudioSession was configured before AVAudioEngine started.
+        // Starting capture only creates the file; no category/options change
+        // occurs here, matching the stable v0.4.2 lifecycle.
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("voiceking-\(UUID().uuidString)")
             .appendingPathExtension("wav")
@@ -173,24 +173,11 @@ final class AudioService: @unchecked Sendable {
         audioSessionIsActive = false
     }
 
-    private func prepareWarmSession(_ session: AVAudioSession) throws {
-        try configureSession(
-            session,
-            options: [.mixWithOthers, .allowBluetoothHFP]
-        )
-    }
-
-    private func prepareRecordingSession(_ session: AVAudioSession) throws {
-        try configureSession(
-            session,
-            options: [.allowBluetoothHFP]
-        )
-    }
-
-    private func configureSession(
-        _ session: AVAudioSession,
-        options: AVAudioSession.CategoryOptions
-    ) throws {
+    private func prepareCaptureSession(_ session: AVAudioSession) throws {
+        let options: AVAudioSession.CategoryOptions = [
+            .mixWithOthers,
+            .allowBluetoothHFP
+        ]
         let categoryChanged =
             session.category != .playAndRecord
             || session.mode != .measurement
