@@ -4,15 +4,15 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.3 direct-handoff flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.4.5 smart-handoff flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
-3. VoiceKing immediately opens in the foreground, activates the microphone and starts the recording request, then automatically returns to the original app.
+3. If the microphone is still warm and ready, recording resumes without leaving the current app. If the microphone has gone cold, VoiceKing immediately opens in the foreground, activates the microphone and starts the recording request, then automatically returns to the original app.
 4. Speak while the keyboard shows the recording state.
 5. Tap the microphone again to finish. The keyboard shows processing and inserts the result automatically when it is ready; there is no insertion confirmation.
 
-There is no floating overlay or video-based background mode. New recordings intentionally use the foreground wake-and-return path first, avoiding a failed background microphone restart before handoff.
+There is no floating overlay or video-based background mode. New recordings reuse the warm microphone when it is still ready; once it is cold, VoiceKing skips the failed background restart attempt and goes straight to foreground wake-and-return.
 
 ## Keyboard design
 
@@ -61,7 +61,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.3 direct-handoff test: based on the stable v0.4.2-era code. Starting a new recording immediately opens VoiceKing, activates capture in the foreground, and returns to the original app. The older silent-audio standby and warm microphone behavior are otherwise preserved, along with automatic result insertion and spoken-language detection.
+v0.4.5 smart-handoff test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
 
 ## Acknowledgements
 
