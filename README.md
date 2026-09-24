@@ -4,11 +4,11 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.5.7 flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.5.8 flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
-3. If VoiceKing is alive in the background, capture starts without an app switch. If background activation fails, VoiceKing briefly appears, starts capture in the foreground, and automatically returns to the original app.
+3. The keyboard always asks the running VoiceKing service to start capture first. A cold microphone enables a bounded foreground fallback, but must not trigger an immediate app switch. Only after background start actually fails may VoiceKing briefly appear, start capture in the foreground, and return to the original app.
 4. Speak while the keyboard shows the recording state.
 5. Tap the microphone again to finish. The keyboard shows processing and inserts the result automatically when it is ready; there is no insertion confirmation.
 
@@ -61,6 +61,8 @@ The `Build` GitHub Actions workflow selects Xcode 26.3, validates a simulator bu
 The ChatGPT/Codex endpoints used by this project are undocumented and may change. Generic automatic return to another iOS app also has no supported public API, so the personal-sideload return helper must be verified on each iOS release. If automatic return is rejected, VoiceKing keeps recording and shows a clear message so the user can return manually.
 
 ## Status
+
+v0.5.8: restores background-first microphone startup and serializes foreground handoff attempts. Tapping the microphone no longer treats a cold microphone as an immediate reason to leave the keyboard; the app handoff remains a bounded recovery path. SwiftUI openURL is tried first and the modern responder-chain fallback is only attempted if the keyboard is still visible after 600 ms. v0.5.6/v0.5.7 request validation, active-app gating, PCM confirmation, and handoff security remain intact.
 
 v0.5.7: improves warm-background activation by replacing the deprecated responder-chain `openURL:` call with the modern completion-handler form, while treating actual keyboard disappearance or matching bridge state as the success signal. Duplicate handoff URLs are idempotent. Local bridge results are capability-protected by the recording request ID, malformed HTTP lengths and duplicate OAuth parameters are rejected safely, and a microphone shutdown error no longer deletes valid captured speech.
 
