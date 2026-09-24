@@ -269,14 +269,13 @@ final class KeyboardViewController: UIInputViewController {
         case .transcribing:
             break
         default:
-            // A warm input engine can record directly. Once the microphone has
-            // gone cold, wake VoiceKing first; iOS does not reliably reactivate
-            // a stopped audio session from the background.
-            if latestState.microphoneReady {
-                startRecordingRequest(allowForegroundFallback: true)
-            } else {
-                launchVoiceKingAndResumeRecording()
-            }
+            // Preserve the stable background-first behavior: ask the running
+            // VoiceKing service to start capture before forcing a foreground
+            // handoff. A cold microphone only enables the bounded foreground
+            // fallback; it must not cause an immediate app switch.
+            startRecordingRequest(
+                allowForegroundFallback: !latestState.microphoneReady
+            )
         }
     }
 
@@ -849,33 +848,36 @@ final class KeyboardViewController: UIInputViewController {
         urlOpenAttemptID = attemptID
         urlOpenFallbackTask?.cancel()
 
-        // Keep the SwiftUI route for cold launch, and also invoke UIKit's modern
-        // openURL:options:completionHandler: dynamically for the personal-
-        // sideload warm-background case. Duplicate delivery is safe because the
-        // containing app treats requestID as an idempotency key.
+        // Use one foreground-opening route at a time. SwiftUI openURL remains
+        // the primary handoff. Only if the keyboard is still visible after a
+        // short bounded wait do we try the modern responder-chain fallback.
+        // This avoids two near-simultaneous open requests tearing down and
+        // recreating the keyboard extension unnecessarily.
         urlLauncher.open(url)
-        let modernOpenWasInvoked = openURLViaResponderChain(
-            url,
-            attemptID: attemptID
-        )
 
-        // API acceptance is not treated as completed handoff. The keyboard must
-        // actually disappear or the app must report this exact request.
         urlOpenFallbackTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(1_200)) }
+            do { try await Task.sleep(for: .milliseconds(600)) }
             catch { return }
             guard let self,
                   self.urlOpenAttemptID == attemptID,
                   self.keyboardVisible,
                   self.pendingAutoRecordingAfterLaunch else { return }
-            self.statusLabel.text = self.localized(
-                chinese: modernOpenWasInvoked
-                    ? "系统尚未切换到 VoiceKing · 再点一次重试"
-                    : "系统不支持自动打开 · 请手动打开 VoiceKing",
-                english: modernOpenWasInvoked
-                    ? "VoiceKing has not opened · tap again to retry"
-                    : "Automatic opening is unavailable · open VoiceKing manually"
+
+            let fallbackInvoked = self.openURLViaResponderChain(
+                url,
+                attemptID: attemptID
             )
+            if !fallbackInvoked {
+                self.pendingAutoRecordingAfterLaunch = false
+                self.handoffWatchdogTask?.cancel()
+                self.handoffWatchdogTask = nil
+                self.urlOpenAttemptID = nil
+                self.statusLabel.text = self.localized(
+                    chinese: "无法自动打开 VoiceKing，请手动启动服务",
+                    english: "Could not open VoiceKing. Start the service manually."
+                )
+                self.refreshUI()
+            }
         }
     }
 
