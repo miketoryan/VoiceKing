@@ -156,8 +156,25 @@ private struct SettingsView: View {
                     .pickerStyle(.segmented)
 
                     Text(t(
-                        "这里只控制 VoiceKing 软件和键盘提示文字。语音输入语言由 ChatGPT 自动识别，可直接混合使用中英文。",
-                        "This only changes VoiceKing's app and keyboard text. ChatGPT detects the spoken language automatically, including mixed Chinese and English."
+                        "这里只控制 VoiceKing 软件和键盘提示文字。",
+                        "This only changes VoiceKing's app and keyboard text."
+                    ))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+
+                Section(t("识别语言", "Recognition Language")) {
+                    Picker(t("默认识别语言", "Default Recognition Language"), selection: $model.recognitionLanguage) {
+                        ForEach(RecognitionLanguage.allCases) { language in
+                            Text(language.displayName(interfaceLanguage: model.interfaceLanguage))
+                                .tag(language)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(t(
+                        "默认使用中文可减少每次自动判断语言的开销；整段英文时可切换为 English，中英混合较多时可选“自动”。",
+                        "Chinese is the default to avoid automatic language detection on every request. Choose English for English-only dictation or Auto for heavily mixed speech."
                     ))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -226,8 +243,8 @@ private struct HelpView: View {
                         "Tap again to stop. The result is inserted automatically without confirmation."
                     ))
                     Text(t(
-                        "ChatGPT 自动判断输入语言；键盘顶部只保留智能/原文模式切换。",
-                        "ChatGPT detects the spoken language automatically. The keyboard only shows Smart/Verbatim mode selection."
+                        "默认识别语言为中文，可在设置中切换为“自动”或 English；键盘顶部只保留智能/原文模式切换。",
+                        "The default recognition language is Chinese. You can switch to Auto or English in Settings; the keyboard only shows Smart/Verbatim mode selection."
                     ))
                 }
 
