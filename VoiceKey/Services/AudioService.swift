@@ -34,7 +34,7 @@ final class AudioService: @unchecked Sendable {
         stopKeepAlive()
 
         let session = AVAudioSession.sharedInstance()
-        try prepareCaptureSession(session)
+        try prepareWarmSession(session)
 
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -67,7 +67,7 @@ final class AudioService: @unchecked Sendable {
         // only playing silence. The input engine is stopped, so the privacy
         // indicator turns off, but the app can resume input from the keyboard
         // without changing audio categories in the background.
-        try prepareCaptureSession(session)
+        try prepareWarmSession(session)
 
         if keepAlivePlayer == nil {
             let player = try AVAudioPlayer(data: Self.silentWAVData)
@@ -84,6 +84,11 @@ final class AudioService: @unchecked Sendable {
 
     func beginCapture() throws -> URL {
         guard isArmed, engine.isRunning else { throw AudioError.notArmed }
+
+        // Actual recording should interrupt media from other apps. The warm
+        // microphone and silent standby remain mixable; only active capture
+        // removes mixWithOthers so iOS pauses/interupts other playback.
+        try prepareRecordingSession(AVAudioSession.sharedInstance())
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("voiceking-\(UUID().uuidString)")
@@ -106,6 +111,12 @@ final class AudioService: @unchecked Sendable {
         let url = currentURL
         currentURL = nil
         lock.unlock()
+
+        // Preserve the v0.4.2 warm-microphone behavior after dictation, but
+        // stop claiming exclusive audio so other apps are allowed to play.
+        if isArmed, engine.isRunning {
+            try? prepareWarmSession(AVAudioSession.sharedInstance())
+        }
         return url
     }
 
@@ -116,13 +127,34 @@ final class AudioService: @unchecked Sendable {
         audioSessionIsActive = false
     }
 
-    private func prepareCaptureSession(_ session: AVAudioSession) throws {
-        let categoryChanged = session.category != .playAndRecord || session.mode != .measurement
+    private func prepareWarmSession(_ session: AVAudioSession) throws {
+        try configureSession(
+            session,
+            options: [.mixWithOthers, .allowBluetoothHFP]
+        )
+    }
+
+    private func prepareRecordingSession(_ session: AVAudioSession) throws {
+        try configureSession(
+            session,
+            options: [.allowBluetoothHFP]
+        )
+    }
+
+    private func configureSession(
+        _ session: AVAudioSession,
+        options: AVAudioSession.CategoryOptions
+    ) throws {
+        let categoryChanged =
+            session.category != .playAndRecord
+            || session.mode != .measurement
+            || session.categoryOptions != options
+
         if categoryChanged {
             try session.setCategory(
                 .playAndRecord,
                 mode: .measurement,
-                options: [.mixWithOthers, .allowBluetoothHFP]
+                options: options
             )
         }
         if !audioSessionIsActive || categoryChanged {
