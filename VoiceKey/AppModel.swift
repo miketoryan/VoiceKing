@@ -58,7 +58,7 @@ final class AppModel: ObservableObject {
     private let transcriber = ChatGPTTranscriptionService()
     private let cleanupService = ChatGPTCleanupService()
     private let localBridge = LocalBridgeServer()
-    private let serverID = UUID().uuidString
+    private var serverID = UUID().uuidString
 
     private var stateRevision: UInt64 = 0
     private var activeRecordingURL: URL?
@@ -213,6 +213,17 @@ final class AppModel: ObservableObject {
         let mode = queryItems.first(where: {
             $0.name == "mode"
         })?.value.flatMap(TranscriptionMode.init(rawValue:)) ?? .smart
+
+        // A long-lived background instance can keep its audio process alive
+        // while the localhost listener has become unreachable to the keyboard.
+        // Rebuild the listener during the foreground handoff and publish a new
+        // server ID so the returned keyboard adopts the fresh bridge exactly
+        // as it would after a clean app launch.
+        guard await restartLocalBridgeForForegroundHandoff() else {
+            handoffActive = false
+            return
+        }
+
         // Fallback path: start the *actual recording file* while VoiceKing is
         // in the foreground, then return to the host app. This avoids the real-
         // device failure where AVAudioEngine reported "recording" after the
@@ -224,11 +235,17 @@ final class AppModel: ObservableObject {
             return
         }
 
-        if let requestID, !requestID.isEmpty {
-            startRecordingFromKeyboard(
-                requestID: requestID,
-                mode: mode
-            )
+        guard let requestID, !requestID.isEmpty,
+              startRecordingFromKeyboard(
+                  requestID: requestID,
+                  mode: mode
+              ),
+              bridgeStatus == .recording else {
+            // Never jump back with a half-activated microphone. If capture did
+            // not really start, the failure path has already returned audio to
+            // safe standby and the user remains in VoiceKing instead.
+            handoffActive = false
+            return
         }
 
         // Return as soon as capture is confirmed. A long artificial delay makes
@@ -352,6 +369,77 @@ final class AppModel: ObservableObject {
         return activated
     }
 
+    private func restartLocalBridgeForForegroundHandoff() async -> Bool {
+        localBridge.stop()
+        try? await Task.sleep(for: .milliseconds(80))
+
+        serverID = UUID().uuidString
+        do {
+            try localBridge.start { [weak self] request in
+                guard let self else {
+                    return BridgeState.unavailable("VoiceKing is not running.")
+                }
+                return await self.handleBridgeRequest(request)
+            }
+            markStateChanged()
+            return true
+        } catch {
+            serviceReady = false
+            lastError = error.localizedDescription
+            bridgeError = error.localizedDescription
+            statusText = ui("键盘本地连接重启失败", "Local keyboard connection restart failed")
+            markStateChanged()
+            return false
+        }
+    }
+
+    private func recoverAudioAfterFailedRecordingStart() {
+        if let url = audio.endCapture() ?? activeRecordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        activeRecordingURL = nil
+        keyboardMonitorTask?.cancel()
+        keyboardMonitorTask = nil
+        lastKeyboardHeartbeat = nil
+        keyboardHasConnected = false
+
+        do {
+            try prepareStandbyAudio()
+            serviceReady = true
+        } catch {
+            audio.disarm()
+            serviceReady = false
+        }
+        markStateChanged()
+    }
+
+    private func abortOrphanedRecordingToStandby() {
+        if let url = audio.endCapture() ?? activeRecordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        activeRecordingURL = nil
+        activeRequestID = nil
+        responseText = nil
+        resultCreatedAt = nil
+        bridgeStatus = .error
+        bridgeError = ui(
+            "键盘未重新连接，已自动关闭麦克风",
+            "Keyboard did not reconnect. Microphone was closed automatically."
+        )
+        lastError = bridgeError
+        lastKeyboardHeartbeat = nil
+        keyboardHasConnected = false
+
+        do {
+            try prepareStandbyAudio()
+            serviceReady = true
+        } catch {
+            audio.disarm()
+            serviceReady = false
+        }
+        markStateChanged()
+    }
+
     private func performAudioOperationWithRetry(
         _ operation: () throws -> Void
     ) async throws {
@@ -380,25 +468,28 @@ final class AppModel: ObservableObject {
         return code == 560_557_684 || code == 2_003_329_396
     }
 
+    @discardableResult
     private func startRecordingFromKeyboard(
         requestID: String?,
         mode: TranscriptionMode
-    ) {
+    ) -> Bool {
         guard serviceReady, audio.isRunning else {
             publishError(
                 "Open VoiceKing and start Keyboard Service first.",
                 requestID: requestID
             )
-            return
+            recoverAudioAfterFailedRecordingStart()
+            return false
         }
         guard let requestID, !requestID.isEmpty else {
             publishError("VoiceKing received an invalid recording request.")
-            return
+            recoverAudioAfterFailedRecordingStart()
+            return false
         }
         guard bridgeStatus != .recording,
               bridgeStatus != .starting,
               bridgeStatus != .transcribing else {
-            return
+            return bridgeStatus == .recording
         }
 
         bridgeStatus = .starting
@@ -413,8 +504,11 @@ final class AppModel: ObservableObject {
             statusText = ui("录音中…", "Recording…")
             startKeyboardMonitor()
             markStateChanged()
+            return true
         } catch {
             publishError(error.localizedDescription, requestID: requestID)
+            recoverAudioAfterFailedRecordingStart()
+            return false
         }
     }
 
@@ -509,6 +603,7 @@ final class AppModel: ObservableObject {
 
     private func startKeyboardMonitor() {
         keyboardMonitorTask?.cancel()
+        let monitorStartedAt = Date()
         keyboardMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
@@ -519,8 +614,20 @@ final class AppModel: ObservableObject {
 
                 guard let self, self.serviceReady else { return }
                 guard self.audio.isRunning else { return }
-                guard self.keyboardHasConnected,
-                      let heartbeat = self.lastKeyboardHeartbeat,
+
+                // Foreground handoff temporarily destroys/recreates the keyboard
+                // extension. A healthy return reconnects quickly. If it never
+                // reconnects, do not leave AVAudioEngine holding the microphone
+                // forever: abandon the orphaned capture and return to standby.
+                if !self.keyboardHasConnected {
+                    if Date().timeIntervalSince(monitorStartedAt) >= 5 {
+                        self.abortOrphanedRecordingToStandby()
+                        return
+                    }
+                    continue
+                }
+
+                guard let heartbeat = self.lastKeyboardHeartbeat,
                       Date().timeIntervalSince(heartbeat) >= LocalBridge.keyboardExitGracePeriod else {
                     continue
                 }
