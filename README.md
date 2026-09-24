@@ -4,7 +4,7 @@ VoiceKing is a personal-use iPhone voice keyboard. When its background service i
 
 ## Current interaction
 
-The v0.4.6 smart-handoff flow follows the current Typeless iOS interaction observed in version 2.6.2:
+The v0.4.7 faster-transcription flow follows the current Typeless iOS interaction observed in version 2.6.2:
 
 1. Open a text field and switch to the VoiceKing keyboard.
 2. Tap the central microphone.
@@ -46,6 +46,12 @@ The containing app records on behalf of the keyboard because iOS keyboard extens
 - If the keyboard does not return during that period, capture stops. An active recording is finished and transcribed; an idle microphone is closed.
 - The background service keeps only a silent audio session alive so the localhost bridge remains reachable. It resumes capture directly when iOS permits; otherwise the keyboard automatically falls back to foreground wake-and-return.
 
+## Faster transcription
+
+- Recognition language is configurable as Chinese (default), Auto, or English. Chinese sends `language=zh`; English sends `language=en`; Auto omits the language hint.
+- Before upload, VoiceKing attempts to create a 16 kHz mono 16-bit PCM WAV optimized for speech. If conversion fails, it automatically falls back to the original recording so transcription is not lost.
+- The recording, warm-microphone, silent-standby, smart-handoff, media interruption, cleanup, and auto-insert behavior are otherwise unchanged.
+
 ## Build and sideload
 
 The `Build` GitHub Actions workflow selects Xcode 26.3, validates a simulator build, archives an unsigned iPhone build, and uploads `VoiceKing-unsigned.ipa`.
@@ -61,7 +67,7 @@ The ChatGPT/Codex endpoints used by this project are undocumented and may change
 
 ## Status
 
-v0.4.6 smart-handoff test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
+v0.4.7 faster-transcription test: based on the stable v0.4.2-era code. While the microphone remains warm, a new recording starts without an app switch. Once the microphone is cold, VoiceKing immediately uses foreground wake-and-return instead of first attempting a background microphone restart. Silent-audio standby, warm microphone retention, automatic result insertion, smart cleanup, and spoken-language detection remain preserved.
 
 ## Acknowledgements
 
