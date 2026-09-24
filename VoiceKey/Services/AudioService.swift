@@ -6,6 +6,8 @@ final class AudioService: @unchecked Sendable {
     private let lock = NSLock()
     private var keepAlivePlayer: AVAudioPlayer?
     private var outputFile: AVAudioFile?
+    private var captureConverter: AVAudioConverter?
+    private var captureOutputFormat: AVAudioFormat?
     private var currentURL: URL?
     private var tapInstalled = false
     private var audioSessionIsActive = false
@@ -94,11 +96,50 @@ final class AudioService: @unchecked Sendable {
             .appendingPathComponent("voiceking-\(UUID().uuidString)")
             .appendingPathExtension("wav")
 
-        let format = engine.inputNode.inputFormat(forBus: 0)
-        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let inputFormat = engine.inputNode.inputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw AudioError.noInput
+        }
+
+        let speechFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: false
+        )
+
+        let file: AVAudioFile
+        let converter: AVAudioConverter?
+        let outputFormat: AVAudioFormat?
+
+        if let speechFormat,
+           let speechConverter = AVAudioConverter(
+               from: inputFormat,
+               to: speechFormat
+           ) {
+            file = try AVAudioFile(
+                forWriting: url,
+                settings: speechFormat.settings,
+                commonFormat: .pcmFormatInt16,
+                interleaved: false
+            )
+            converter = speechConverter
+            outputFormat = speechFormat
+        } else {
+            // Keep a safe fallback for unusual audio routes. Recognition still
+            // works even if a device cannot create the 16 kHz speech converter.
+            file = try AVAudioFile(
+                forWriting: url,
+                settings: inputFormat.settings
+            )
+            converter = nil
+            outputFormat = nil
+        }
 
         lock.lock()
         outputFile = file
+        captureConverter = converter
+        captureOutputFormat = outputFormat
         currentURL = url
         lock.unlock()
 
@@ -108,6 +149,8 @@ final class AudioService: @unchecked Sendable {
     func endCapture() -> URL? {
         lock.lock()
         outputFile = nil
+        captureConverter = nil
+        captureOutputFormat = nil
         let url = currentURL
         currentURL = nil
         lock.unlock()
@@ -168,6 +211,8 @@ final class AudioService: @unchecked Sendable {
     private func stopCaptureEngine() {
         lock.lock()
         outputFile = nil
+        captureConverter = nil
+        captureOutputFormat = nil
         currentURL = nil
         lock.unlock()
 
@@ -189,11 +234,43 @@ final class AudioService: @unchecked Sendable {
 
     private func consume(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
-        let file = outputFile
-        if let file {
+        defer { lock.unlock() }
+
+        guard let file = outputFile else { return }
+
+        guard let converter = captureConverter,
+              let outputFormat = captureOutputFormat else {
             try? file.write(from: buffer)
+            return
         }
-        lock.unlock()
+
+        let ratio = outputFormat.sampleRate / buffer.format.sampleRate
+        let capacity = max(
+            AVAudioFrameCount(256),
+            AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 64
+        )
+        guard let converted = AVAudioPCMBuffer(
+            pcmFormat: outputFormat,
+            frameCapacity: capacity
+        ) else { return }
+
+        var suppliedInput = false
+        var conversionError: NSError?
+        _ = converter.convert(
+            to: converted,
+            error: &conversionError
+        ) { _, inputStatus in
+            if suppliedInput {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            suppliedInput = true
+            inputStatus.pointee = .haveData
+            return buffer
+        }
+
+        guard conversionError == nil, converted.frameLength > 0 else { return }
+        try? file.write(from: converted)
     }
 
     private static let silentWAVData: Data = {
