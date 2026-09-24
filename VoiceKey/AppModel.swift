@@ -2,6 +2,29 @@ import Combine
 import Foundation
 import UIKit
 
+enum RecognitionLanguage: String, CaseIterable, Identifiable {
+    case chinese = "zh"
+    case automatic = "auto"
+    case english = "en"
+
+    var id: String { rawValue }
+
+    var apiValue: String? {
+        self == .automatic ? nil : rawValue
+    }
+
+    func displayName(interfaceLanguage: InterfaceLanguage) -> String {
+        switch self {
+        case .chinese:
+            interfaceLanguage.text(chinese: "中文", english: "Chinese")
+        case .automatic:
+            interfaceLanguage.text(chinese: "自动", english: "Auto")
+        case .english:
+            "English"
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var signedIn: Bool
@@ -18,6 +41,15 @@ final class AppModel: ObservableObject {
             )
             refreshStatusText()
             markStateChanged()
+        }
+    }
+
+    @Published var recognitionLanguage: RecognitionLanguage {
+        didSet {
+            UserDefaults.standard.set(
+                recognitionLanguage.rawValue,
+                forKey: Defaults.recognitionLanguage
+            )
         }
     }
 
@@ -44,6 +76,7 @@ final class AppModel: ObservableObject {
 
     private enum Defaults {
         static let interfaceLanguage = "voiceking.interface-language"
+        static let recognitionLanguage = "voiceking.recognition-language"
     }
 
     init() {
@@ -51,6 +84,9 @@ final class AppModel: ObservableObject {
             rawValue: UserDefaults.standard.string(forKey: Defaults.interfaceLanguage) ?? ""
         ) ?? .chinese
 
+        recognitionLanguage = RecognitionLanguage(
+            rawValue: UserDefaults.standard.string(forKey: Defaults.recognitionLanguage) ?? ""
+        ) ?? .chinese
 
         let auth = ChatGPTAuthManager()
         self.auth = auth
@@ -422,7 +458,8 @@ final class AppModel: ObservableObject {
             let credential = try await auth.validCredential()
             let rawText = try await transcriber.transcribe(
                 audioURL: url,
-                credential: credential
+                credential: credential,
+                language: recognitionLanguage.apiValue
             )
             let text: String
             if activeTranscriptionMode == .smart {
