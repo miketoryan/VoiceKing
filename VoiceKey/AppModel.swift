@@ -102,21 +102,27 @@ final class AppModel: ObservableObject {
         // Keep the local bridge available with the microphone off. When the
         // keyboard needs audio, VoiceKing briefly wakes in the foreground,
         // starts capture, and immediately returns to the previous app.
-        await startService(armingMicrophoneBeforeReturn: false)
+        _ = await startService(armingMicrophoneBeforeReturn: false)
     }
 
 
-    private func startService(armingMicrophoneBeforeReturn: Bool) async {
+    @discardableResult
+    private func startService(armingMicrophoneBeforeReturn: Bool) async -> Bool {
+        // Never let a stale ready flag from an earlier background session make
+        // a failed microphone restart look successful.
+        serviceReady = false
         lastError = nil
+        markStateChanged()
+
         guard signedIn else {
             lastError = "Sign in with ChatGPT first."
-            return
+            return false
         }
 
         let granted = await AudioService.requestPermission()
         guard granted else {
             lastError = "Microphone permission is required."
-            return
+            return false
         }
 
         do {
@@ -154,8 +160,11 @@ final class AppModel: ObservableObject {
             lastKeyboardHeartbeat = nil
             keyboardHasConnected = false
             markStateChanged()
+            return true
         } catch {
+            serviceReady = false
             publishError(error.localizedDescription)
+            return false
         }
     }
 
@@ -177,13 +186,28 @@ final class AppModel: ObservableObject {
         let mode = queryItems.first(where: {
             $0.name == "mode"
         })?.value.flatMap(TranscriptionMode.init(rawValue:)) ?? .smart
-        // Fallback path: start the *actual recording file* while VoiceKing is
-        // in the foreground, then return to the host app. This avoids the real-
-        // device failure where AVAudioEngine reported "recording" after the
-        // app switch but delivered only silence, followed by CoreAudio
-        // 2003329396 on retry.
-        await startService(armingMicrophoneBeforeReturn: true)
-        guard serviceReady else {
+        // A warm background process can receive onOpenURL while iOS is still
+        // transitioning it through .inactive. Starting AVAudioSession in that
+        // window is the real-device regression: the old serviceReady value
+        // survives, the restart fails, and VoiceKing immediately returns to the
+        // host without recording. Wait for a genuinely active foreground scene.
+        guard await waitForApplicationToBecomeActive() else {
+            handoffActive = false
+            serviceReady = false
+            publishError(
+                ui(
+                    "VoiceKing 未进入前台，请再次点击语音按钮",
+                    "VoiceKing did not reach the foreground. Tap the microphone again."
+                ),
+                requestID: requestID
+            )
+            return
+        }
+
+        // Start the actual recording file in the foreground. The explicit
+        // Boolean prevents an earlier serviceReady value from masking failure.
+        let serviceStarted = await startService(armingMicrophoneBeforeReturn: true)
+        guard serviceStarted else {
             handoffActive = false
             return
         }
@@ -194,11 +218,24 @@ final class AppModel: ObservableObject {
         // real input engine instead of waiting forever for its first heartbeat.
         noteKeyboardHeartbeat()
 
-        if let requestID, !requestID.isEmpty {
-            await startRecordingFromKeyboard(
-                requestID: requestID,
-                mode: mode
-            )
+        guard let requestID, !requestID.isEmpty else {
+            handoffActive = false
+            publishError("VoiceKing received an invalid recording request.")
+            return
+        }
+
+        await startRecordingFromKeyboard(
+            requestID: requestID,
+            mode: mode
+        )
+
+        // Never auto-return on a superficial engine start. Only real PCM for
+        // this exact request proves that VoiceKing is ready in the background.
+        guard bridgeStatus == .recording,
+              activeRequestID == requestID,
+              audio.hasWrittenAudioFrames() else {
+            handoffActive = false
+            return
         }
 
         // Return as soon as capture is confirmed. A long artificial delay makes
@@ -739,6 +776,31 @@ final class AppModel: ObservableObject {
 
     private func markStateChanged() {
         stateRevision &+= 1
+    }
+
+    private func waitForApplicationToBecomeActive(
+        timeout: Duration = .seconds(2)
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+
+        while UIApplication.shared.applicationState != .active {
+            guard clock.now < deadline else { return false }
+            do {
+                try await Task.sleep(for: .milliseconds(40))
+            } catch {
+                return false
+            }
+        }
+
+        // Let the foreground transition and audio route settle for one short
+        // beat before activating AVAudioSession on a previously suspended app.
+        do {
+            try await Task.sleep(for: .milliseconds(80))
+        } catch {
+            return false
+        }
+        return UIApplication.shared.applicationState == .active
     }
 
     private func openHostApplication(bundleIdentifier: String) -> Bool {
