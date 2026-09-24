@@ -127,7 +127,7 @@ private struct HomeView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Spacer()
-                    Text("v0.4.0 · build 17")
+                    Text("v0.4.3 · build 27")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(.trailing, 16)
@@ -254,7 +254,7 @@ private struct HelpView: View {
                 }
 
                 Section(t("版本", "Version")) {
-                    LabeledContent("VoiceKing", value: "0.4.0 · build 17")
+                    LabeledContent("VoiceKing", value: "0.4.3 · build 27")
                 }
             }
             .navigationTitle(t("说明", "Help"))
