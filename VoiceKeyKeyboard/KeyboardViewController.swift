@@ -230,10 +230,14 @@ final class KeyboardViewController: UIInputViewController {
         case .starting, .transcribing:
             break
         default:
-            // Always use the proven foreground wake-and-return path for a new
-            // recording. This avoids first attempting a background AVAudioSession
-            // restart that can fail with CoreAudio 2003329396 before fallback.
-            launchVoiceKingAndResumeRecording()
+            // Reuse the warm microphone while it is still genuinely ready.
+            // Once the microphone has gone cold, skip the failing background
+            // AVAudioSession restart and immediately use foreground wake-and-return.
+            if latestState.microphoneReady {
+                startRecordingRequest()
+            } else {
+                launchVoiceKingAndResumeRecording()
+            }
         }
     }
 
