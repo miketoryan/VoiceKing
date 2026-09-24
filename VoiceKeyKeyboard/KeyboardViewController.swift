@@ -48,7 +48,15 @@ final class KeyboardViewController: UIInputViewController {
             rawValue: UserDefaults.standard.string(forKey: "voiceking.interface-language") ?? ""
         ) ?? .chinese
     )
-    private var currentRequestID: String?
+    private var currentRequestID: String? {
+        didSet {
+            if let currentRequestID {
+                UserDefaults.standard.set(currentRequestID, forKey: Defaults.pendingRequestID)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Defaults.pendingRequestID)
+            }
+        }
+    }
     private var keyboardVisible = false
     private var mayAutoInsert = false
     private var insertionScheduledForRequestID: String?
@@ -62,14 +70,17 @@ final class KeyboardViewController: UIInputViewController {
     private var backgroundStartFallbackTask: Task<Void, Never>?
     private var handoffWatchdogTask: Task<Void, Never>?
     private var urlOpenFallbackTask: Task<Void, Never>?
+    private var urlOpenAttemptID: UUID?
 
     private enum Defaults {
         static let transcriptionMode = "voiceking.transcription-mode"
         static let interfaceLanguage = "voiceking.interface-language"
+        static let pendingRequestID = "voiceking.pending-request-id"
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        currentRequestID = UserDefaults.standard.string(forKey: Defaults.pendingRequestID)
         configureUI()
         refreshUI()
     }
@@ -78,6 +89,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillAppear(animated)
         keyboardVisible = true
         if currentRequestID != nil { mayAutoInsert = true }
+        resolvedHostBundleIdentifier = nil
         resolveHostApplicationInAdvance()
     }
 
@@ -91,6 +103,9 @@ final class KeyboardViewController: UIInputViewController {
         keyboardVisible = false
         mayAutoInsert = false
         insertionScheduledForRequestID = nil
+        urlOpenFallbackTask?.cancel()
+        urlOpenFallbackTask = nil
+        urlOpenAttemptID = nil
         stopBridgeTasks()
         super.viewWillDisappear(animated)
     }
@@ -114,6 +129,7 @@ final class KeyboardViewController: UIInputViewController {
         backgroundStartFallbackTask?.cancel()
         handoffWatchdogTask?.cancel()
         urlOpenFallbackTask?.cancel()
+        urlOpenAttemptID = nil
     }
 
     private func configureUI() {
@@ -319,13 +335,13 @@ final class KeyboardViewController: UIInputViewController {
             stopBridgeTasks()
             return
         }
-        do { apply(try await bridge.send(.heartbeat)) }
+        do { apply(try await bridge.send(.heartbeat, requestID: currentRequestID)) }
         catch { applyConnectionFailure() }
     }
 
     private func fetchState() async {
         guard keyboardVisible, isKeyboardActuallyVisible else { return }
-        do { apply(try await bridge.fetchState()) }
+        do { apply(try await bridge.fetchState(requestID: currentRequestID)) }
         catch { applyConnectionFailure() }
     }
 
@@ -344,8 +360,9 @@ final class KeyboardViewController: UIInputViewController {
 
     private func notifyKeyboardHidden() {
         let bridge = bridge
+        let requestID = currentRequestID
         Task {
-            _ = try? await bridge.send(.keyboardHidden)
+            _ = try? await bridge.send(.keyboardHidden, requestID: requestID)
         }
     }
 
@@ -463,6 +480,7 @@ final class KeyboardViewController: UIInputViewController {
                 handoffWatchdogTask = nil
                 urlOpenFallbackTask?.cancel()
                 urlOpenFallbackTask = nil
+                urlOpenAttemptID = nil
                 mayAutoInsert = true
             } else if state.status == .error {
                 launchVoiceKingAndResumeRecording(requestID: backgroundRequestID)
@@ -483,12 +501,14 @@ final class KeyboardViewController: UIInputViewController {
                 handoffWatchdogTask = nil
                 urlOpenFallbackTask?.cancel()
                 urlOpenFallbackTask = nil
+                urlOpenAttemptID = nil
                 mayAutoInsert = true
                 return
             }
 
             if state.status == .idle, state.microphoneReady {
                 pendingAutoRecordingAfterLaunch = false
+                urlOpenAttemptID = nil
                 startRecordingRequest(requestID: currentRequestID)
                 return
             }
@@ -825,32 +845,37 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
 
-        // Restore the proven v0.4.2 handoff path. SwiftUI openURL is the
-        // primary request; success is confirmed by the keyboard disappearing
-        // or by the app reporting this request, never by an optimistic API
-        // completion Boolean.
+        let attemptID = UUID()
+        urlOpenAttemptID = attemptID
         urlOpenFallbackTask?.cancel()
-        urlLauncher.open(url)
 
-        // Personal-sideload fallback. If SwiftUI has already opened VoiceKing,
-        // viewWillDisappear clears keyboardVisible and this path is skipped.
+        // Keep the SwiftUI route for cold launch, and also invoke UIKit's modern
+        // openURL:options:completionHandler: dynamically for the personal-
+        // sideload warm-background case. Duplicate delivery is safe because the
+        // containing app treats requestID as an idempotency key.
+        urlLauncher.open(url)
+        let modernOpenWasInvoked = openURLViaResponderChain(
+            url,
+            attemptID: attemptID
+        )
+
+        // API acceptance is not treated as completed handoff. The keyboard must
+        // actually disappear or the app must report this exact request.
         urlOpenFallbackTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .milliseconds(600)) }
+            do { try await Task.sleep(for: .milliseconds(1_200)) }
             catch { return }
             guard let self,
+                  self.urlOpenAttemptID == attemptID,
                   self.keyboardVisible,
                   self.pendingAutoRecordingAfterLaunch else { return }
-
-            if !self.openURLViaResponderChain(url) {
-                self.pendingAutoRecordingAfterLaunch = false
-                self.handoffWatchdogTask?.cancel()
-                self.handoffWatchdogTask = nil
-                self.statusLabel.text = self.localized(
-                    chinese: "无法自动打开 VoiceKing，请手动启动服务",
-                    english: "Could not open VoiceKing. Start the service manually."
-                )
-                self.refreshUI()
-            }
+            self.statusLabel.text = self.localized(
+                chinese: modernOpenWasInvoked
+                    ? "系统尚未切换到 VoiceKing · 再点一次重试"
+                    : "系统不支持自动打开 · 请手动打开 VoiceKing",
+                english: modernOpenWasInvoked
+                    ? "VoiceKing has not opened · tap again to retry"
+                    : "Automatic opening is unavailable · open VoiceKing manually"
+            )
         }
     }
 
@@ -887,6 +912,7 @@ final class KeyboardViewController: UIInputViewController {
         handoffWatchdogTask = nil
         urlOpenFallbackTask?.cancel()
         urlOpenFallbackTask = nil
+        urlOpenAttemptID = nil
 
         pendingAutoRecordingAfterLaunch = false
         pendingBackgroundStartRequestID = nil
@@ -911,13 +937,47 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @discardableResult
-    private func openURLViaResponderChain(_ url: URL) -> Bool {
-        let selector = NSSelectorFromString("openURL:")
+    private func openURLViaResponderChain(
+        _ url: URL,
+        attemptID: UUID
+    ) -> Bool {
+        let selector = NSSelectorFromString("openURL:options:completionHandler:")
         var responder: UIResponder? = self
 
         while let current = responder {
             if current.responds(to: selector) {
-                current.perform(selector, with: url)
+                typealias Completion = @convention(block) (Bool) -> Void
+                typealias ModernOpenURL = @convention(c) (
+                    AnyObject,
+                    Selector,
+                    NSURL,
+                    NSDictionary,
+                    Completion
+                ) -> Void
+
+                let completion: Completion = { [weak self] accepted in
+                    Task { @MainActor in
+                        guard let self,
+                              self.urlOpenAttemptID == attemptID,
+                              self.keyboardVisible,
+                              self.pendingAutoRecordingAfterLaunch else { return }
+                        if !accepted {
+                            self.statusLabel.text = self.localized(
+                                chinese: "系统拒绝自动打开 · 再点一次重试",
+                                english: "iOS rejected automatic opening · tap again"
+                            )
+                        }
+                    }
+                }
+                let implementation = current.method(for: selector)
+                let openURL = unsafeBitCast(implementation, to: ModernOpenURL.self)
+                openURL(
+                    current,
+                    selector,
+                    url as NSURL,
+                    NSDictionary(),
+                    completion
+                )
                 return true
             }
             responder = current.next

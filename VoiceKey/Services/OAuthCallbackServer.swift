@@ -6,16 +6,25 @@ final class OAuthCallbackServer {
     private let redirectBase = "voiceking://auth/callback"
 
     func start() async throws -> NWListener {
-        let listener = try NWListener(using: .tcp, on: port)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port)
+        let listener = try NWListener(using: parameters)
 
         listener.newConnectionHandler = { [redirectBase] connection in
             connection.start(queue: .global(qos: .userInitiated))
             connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { data, _, _, _ in
                 guard let data,
                       let request = String(data: data, encoding: .utf8),
-                      let firstLine = request.components(separatedBy: "\r\n").first,
-                      let pathPart = firstLine.split(separator: " ").dropFirst().first,
-                      let components = URLComponents(string: String(pathPart)) else {
+                      let firstLine = request.components(separatedBy: "\r\n").first else {
+                    connection.cancel()
+                    return
+                }
+
+                let requestParts = firstLine.split(separator: " ")
+                guard requestParts.count >= 2,
+                      requestParts[0] == "GET",
+                      let components = URLComponents(string: String(requestParts[1])),
+                      components.path == "/auth/callback" else {
                     connection.cancel()
                     return
                 }

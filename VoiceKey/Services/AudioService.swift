@@ -47,7 +47,14 @@ final class AudioService: @unchecked Sendable {
         do {
             try engine.start()
         } catch {
+            if tapInstalled {
+                input.removeTap(onBus: 0)
+                tapInstalled = false
+            }
+            engine.stop()
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
             audioSessionIsActive = false
+            isArmed = false
             throw error
         }
         isArmed = true

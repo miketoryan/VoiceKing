@@ -47,9 +47,9 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
     }
 
     func signIn() async throws {
-        let verifier = Self.randomURLSafeString(byteCount: 32)
+        let verifier = try Self.randomURLSafeString(byteCount: 32)
         let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
-        let state = Self.randomURLSafeString(byteCount: 24)
+        let state = try Self.randomURLSafeString(byteCount: 24)
 
         guard var components = URLComponents(string: Config.authorizeURL) else {
             throw AuthError.invalidURL
@@ -96,12 +96,18 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
 
         authSession = nil
 
-        guard let callbackComponents = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
+        guard let callbackComponents = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+              callbackComponents.scheme?.lowercased() == "voiceking",
+              callbackComponents.host?.lowercased() == "auth",
+              callbackComponents.path == "/callback" else {
             throw AuthError.invalidCallback
         }
-        let params = Dictionary(uniqueKeysWithValues: (callbackComponents.queryItems ?? []).compactMap { item in
-            item.value.map { (item.name, $0) }
-        })
+        var params: [String: String] = [:]
+        for item in callbackComponents.queryItems ?? [] {
+            guard let value = item.value else { continue }
+            guard params[item.name] == nil else { throw AuthError.invalidCallback }
+            params[item.name] = value
+        }
 
         guard params["state"] == state else { throw AuthError.stateMismatch }
         guard let code = params["code"] else {
@@ -199,9 +205,11 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
         return json
     }
 
-    private static func randomURLSafeString(byteCount: Int) -> String {
+    private static func randomURLSafeString(byteCount: Int) throws -> String {
         var bytes = [UInt8](repeating: 0, count: byteCount)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw AuthError.randomGenerationFailed
+        }
         return base64URL(Data(bytes))
     }
 
@@ -232,6 +240,7 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
         case invalidTokenResponse
         case notSignedIn
         case refreshUnavailable
+        case randomGenerationFailed
 
         var errorDescription: String? {
             switch self {
@@ -244,6 +253,7 @@ final class ChatGPTAuthManager: NSObject, ObservableObject, ASWebAuthenticationP
             case .invalidTokenResponse: "OpenAI returned an invalid token response."
             case .notSignedIn: "Sign in with ChatGPT first."
             case .refreshUnavailable: "The ChatGPT session cannot be refreshed. Sign in again."
+            case .randomGenerationFailed: "Could not create a secure OAuth request. Try again."
             }
         }
     }

@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     private var keyboardMonitorTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var audioActivationTask: Task<Bool, Never>?
+    private var handoffRequestIDInProgress: String?
 
     private enum Defaults {
         static let interfaceLanguage = "voiceking.interface-language"
@@ -173,19 +174,45 @@ final class AppModel: ObservableObject {
               url.host?.lowercased() == "start-recording" else {
             return
         }
-        handoffActive = true
 
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let queryItems = components?.queryItems ?? []
         let returnBundleIdentifier = queryItems.first(where: {
             $0.name == "returnBundleIdentifier"
         })?.value
-        let requestID = queryItems.first(where: {
-            $0.name == "requestID"
-        })?.value
+        let requestIDs = queryItems.filter { $0.name == "requestID" }.compactMap(\.value)
+        guard requestIDs.count == 1,
+              let requestID = requestIDs.first,
+              UUID(uuidString: requestID) != nil else {
+            lastError = "VoiceKing rejected an invalid recording request."
+            return
+        }
         let mode = queryItems.first(where: {
             $0.name == "mode"
         })?.value.flatMap(TranscriptionMode.init(rawValue:)) ?? .smart
+
+        // Multiple best-effort URL opening mechanisms may deliver the same
+        // handoff more than once. Never let a duplicate reset a live capture.
+        if handoffRequestIDInProgress == requestID
+            || (activeRequestID == requestID
+                && bridgeStatus != .idle
+                && bridgeStatus != .error) {
+            return
+        }
+        if let activeRequestID,
+           activeRequestID != requestID,
+           bridgeStatus != .idle,
+           bridgeStatus != .error {
+            lastError = "VoiceKing rejected a handoff that did not own the active recording."
+            return
+        }
+        handoffRequestIDInProgress = requestID
+        defer {
+            if handoffRequestIDInProgress == requestID {
+                handoffRequestIDInProgress = nil
+            }
+        }
+        handoffActive = true
         // A warm background process can receive onOpenURL while iOS is still
         // transitioning it through .inactive. Starting AVAudioSession in that
         // window is the real-device regression: the old serviceReady value
@@ -217,12 +244,6 @@ final class AppModel: ObservableObject {
         // it never reconnects, the microphone monitor must still shut down the
         // real input engine instead of waiting forever for its first heartbeat.
         noteKeyboardHeartbeat()
-
-        guard let requestID, !requestID.isEmpty else {
-            handoffActive = false
-            publishError("VoiceKing received an invalid recording request.")
-            return
-        }
 
         await startRecordingFromKeyboard(
             requestID: requestID,
@@ -287,12 +308,20 @@ final class AppModel: ObservableObject {
             break
 
         case .heartbeat:
-            noteKeyboardHeartbeat()
+            if activeRequestID == nil || request.requestID == activeRequestID {
+                noteKeyboardHeartbeat()
+            }
 
         case .keyboardHidden:
-            noteKeyboardExit()
+            if activeRequestID == nil || request.requestID == activeRequestID {
+                noteKeyboardExit()
+            }
 
         case .startRecording:
+            guard let requestID = request.requestID,
+                  UUID(uuidString: requestID) != nil else {
+                return currentBridgeState(authorizedRequestID: request.requestID)
+            }
             noteKeyboardHeartbeat()
 
             // Once the input engine has gone cold, iOS does not reliably allow
@@ -306,32 +335,36 @@ final class AppModel: ObservableObject {
                         "麦克风已休眠，正在唤醒 VoiceKing",
                         "The microphone is asleep. Waking VoiceKing."
                     ),
-                    requestID: request.requestID
+                    requestID: requestID
                 )
             } else if await activateMicrophoneForRecording() {
                 await startRecordingFromKeyboard(
-                    requestID: request.requestID,
+                    requestID: requestID,
                     mode: request.mode ?? .smart
                 )
             }
 
         case .stopRecording:
-            noteKeyboardHeartbeat()
-            beginFinishingRecording(
-                expectedRequestID: request.requestID,
-                deactivateMicrophoneAfterCapture: false
-            )
+            if request.requestID == activeRequestID {
+                noteKeyboardHeartbeat()
+                beginFinishingRecording(
+                    expectedRequestID: request.requestID,
+                    deactivateMicrophoneAfterCapture: false
+                )
+            }
 
         case .recoverStalledRecording:
-            noteKeyboardHeartbeat()
-            await recoverStalledRecording(expectedRequestID: request.requestID)
+            if request.requestID == activeRequestID {
+                noteKeyboardHeartbeat()
+                await recoverStalledRecording(expectedRequestID: request.requestID)
+            }
 
         case .acknowledgeResult:
             acknowledgeResult(requestID: request.requestID)
 
         }
 
-        return currentBridgeState()
+        return currentBridgeState(authorizedRequestID: request.requestID)
     }
 
     private func noteKeyboardHeartbeat() {
@@ -439,13 +472,11 @@ final class AppModel: ObservableObject {
             return
         }
 
-        // A keyboard process can be suspended while the app remains alive.
-        // If that leaves an old start/recording request behind, a new tap must
-        // replace it instead of being ignored forever. Repeating the same
-        // request is idempotent; transcription is never interrupted.
+        // Repeating the same request is idempotent. A different unauthenticated
+        // request must never be allowed to discard the user's live capture.
         if bridgeStatus == .recording || bridgeStatus == .starting {
-            guard activeRequestID != requestID else { return }
-            discardActiveCapture()
+            guard activeRequestID == requestID else { return }
+            return
         }
         guard bridgeStatus != .transcribing else {
             return
@@ -512,9 +543,8 @@ final class AppModel: ObservableObject {
     private func recoverStalledRecording(expectedRequestID: String?) async {
         guard bridgeStatus != .transcribing,
               bridgeStatus != .completed else { return }
-        guard expectedRequestID == nil
-                || activeRequestID == nil
-                || activeRequestID == expectedRequestID else { return }
+        guard let expectedRequestID,
+              activeRequestID == expectedRequestID else { return }
 
         let pendingActivation = audioActivationTask
         pendingActivation?.cancel()
@@ -546,7 +576,7 @@ final class AppModel: ObservableObject {
     ) async {
         guard bridgeStatus == .recording else { return }
         guard let requestID = activeRequestID,
-              expectedRequestID == nil || expectedRequestID == requestID else { return }
+              expectedRequestID == requestID else { return }
 
         let capturedURL = audio.endCapture() ?? activeRecordingURL
         activeRecordingURL = nil
@@ -566,9 +596,13 @@ final class AppModel: ObservableObject {
             do {
                 try prepareStandbyAudio()
             } catch {
-                publishError(error.localizedDescription, requestID: requestID)
-                try? FileManager.default.removeItem(at: url)
-                return
+                // The recording is already finalized. A failure to deactivate
+                // AVAudioSession must not destroy valid speech before upload.
+                audio.disarm()
+                lastError = ui(
+                    "麦克风关闭出现问题，但录音仍会继续识别：\(error.localizedDescription)",
+                    "The microphone did not close cleanly, but transcription will continue: \(error.localizedDescription)"
+                )
             }
         }
 
@@ -665,9 +699,11 @@ final class AppModel: ObservableObject {
         do {
             try prepareStandbyAudio()
         } catch {
-            publishError(error.localizedDescription)
-            stopService()
-            return
+            audio.disarm()
+            lastError = ui(
+                "麦克风关闭出现问题：\(error.localizedDescription)",
+                "The microphone did not close cleanly: \(error.localizedDescription)"
+            )
         }
         lastKeyboardHeartbeat = nil
         keyboardHasConnected = false
@@ -690,7 +726,7 @@ final class AppModel: ObservableObject {
     }
 
     private func acknowledgeResult(requestID: String?) {
-        guard requestID == nil || requestID == activeRequestID else { return }
+        guard let requestID, requestID == activeRequestID else { return }
         activeRequestID = nil
         clearResult()
         if bridgeStatus == .completed || bridgeStatus == .error {
@@ -725,17 +761,18 @@ final class AppModel: ObservableObject {
         markStateChanged()
     }
 
-    private func currentBridgeState() -> BridgeState {
-        BridgeState(
+    private func currentBridgeState(authorizedRequestID: String?) -> BridgeState {
+        let mayReadRequest = activeRequestID == nil || authorizedRequestID == activeRequestID
+        return BridgeState(
             serverID: serverID,
             revision: stateRevision,
             serviceReady: serviceReady,
             microphoneReady: audio.isRunning,
             status: bridgeStatus,
-            requestID: activeRequestID,
-            transcribedText: responseText,
-            resultCreatedAt: resultCreatedAt,
-            lastError: bridgeError,
+            requestID: mayReadRequest ? activeRequestID : nil,
+            transcribedText: mayReadRequest ? responseText : nil,
+            resultCreatedAt: mayReadRequest ? resultCreatedAt : nil,
+            lastError: mayReadRequest ? bridgeError : nil,
             interfaceLanguage: interfaceLanguage
         )
     }

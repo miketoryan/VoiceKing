@@ -139,11 +139,14 @@ struct LocalBridgeClient: Sendable {
         self.session = session
     }
 
-    func fetchState() async throws -> BridgeState {
+    func fetchState(requestID: String? = nil) async throws -> BridgeState {
         var request = URLRequest(url: LocalBridge.stateURL)
         request.httpMethod = "GET"
         request.timeoutInterval = 2
         request.setValue(LocalBridge.protocolVersion, forHTTPHeaderField: "X-VoiceKing-Protocol")
+        if let requestID, !requestID.isEmpty {
+            request.setValue(requestID, forHTTPHeaderField: "X-VoiceKing-Request-ID")
+        }
         return try await perform(request)
     }
 

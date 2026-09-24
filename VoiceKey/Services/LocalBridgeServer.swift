@@ -139,13 +139,32 @@ final class LocalBridgeServer: @unchecked Sendable {
             return .invalid
         }
 
-        let contentLength = Int(headers["content-length"] ?? "") ?? 0
-
         let bodyStart = headerRange.upperBound
-        guard data.count >= bodyStart + contentLength else { return .incomplete }
+        guard bodyStart <= data.count else { return .invalid }
+
+        let contentLength: Int
+        if let rawContentLength = headers["content-length"] {
+            guard let parsedLength = Int(rawContentLength),
+                  parsedLength >= 0,
+                  parsedLength <= 65_536 else {
+                return .invalid
+            }
+            contentLength = parsedLength
+        } else {
+            contentLength = 0
+        }
+
+        // Compare by subtraction so a malicious Content-Length cannot overflow
+        // bodyStart + contentLength and crash the containing app.
+        guard contentLength <= data.count - bodyStart else { return .incomplete }
 
         if method == "GET", path == "/state" {
-            return .request(BridgeRequest(action: .state))
+            return .request(
+                BridgeRequest(
+                    action: .state,
+                    requestID: headers["x-voiceking-request-id"]
+                )
+            )
         }
 
         guard method == "POST", path == "/command", contentLength > 0 else {
